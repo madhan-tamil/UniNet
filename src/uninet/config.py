@@ -42,6 +42,12 @@ class Settings:
     api_host: str = "127.0.0.1"
     api_port: int = 8000
 
+    # ---- dashboard auth (single operator account; prototype-grade) ------
+    auth_disabled: bool = False
+    auth_user: str = "admin"
+    auth_password: str = "uninet"
+    secret_key: str = "uninet-dev-secret-change-me"
+
     # ---- derived helpers -------------------------------------------------
     @property
     def model_path_anomaly(self) -> Path:

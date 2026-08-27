@@ -1,0 +1,16 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+*.egg-info
+build
+dist
+data/raw
+data/processed
+models/*.joblib
+models/*.pt
+frontend/node_modules
+.claude

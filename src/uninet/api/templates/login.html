@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>UniNet · Sign in</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body class="login-body">
+  <form class="login-card" method="post" action="{{ url_for('auth.do_login') }}">
+    <div class="login-brand">
+      <span class="logo-dot"></span>
+      <div>
+        <h1>UniNet</h1>
+        <p>Unidirectional Threat Console</p>
+      </div>
+    </div>
+
+    {% if error %}<div class="login-error">{{ error }}</div>{% endif %}
+
+    <label>Username
+      <input name="username" autocomplete="username" autofocus required />
+    </label>
+    <label>Password
+      <input name="password" type="password" autocomplete="current-password" required />
+    </label>
+    <input type="hidden" name="next" value="{{ next }}" />
+    <button type="submit">Sign in</button>
+
+    <p class="login-hint">Read-only monitoring. Default: <code>admin</code> / <code>uninet</code></p>
+  </form>
+</body>
+</html>

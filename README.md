@@ -13,7 +13,7 @@ alerts. No return path, no probing, no payload decryption.
 
 | Phase | Scope | State |
 |-------|-------|-------|
-| 1 | ingestion → features → TB-Graph → detector → API → dashboard | ✅ |
+| 1 | ingestion → features → TB-Graph → detector → API → dashboard (session login) | ✅ |
 | 2 | RGAT + anomaly model → fused threat score | ✅ (RGAT via `[ml]` extra; heuristic graph scorer otherwise) |
 | 3 | explainability (feature importance, subgraph, timeline) | scaffold only |
 | 4 | read-only analyst assistant | scaffold only (`POST /api/ask` → 501) |
@@ -22,22 +22,36 @@ On the built-in synthetic scenarios (8 seeds): **precision 1.0, recall 1.0, FP-r
 single-thread throughput ≈ **24k flows/sec**. These are the defensible numbers — see
 `python -m uninet.eval.metrics`.
 
-## Quick start
+## Run it — one command
 
+**Docker** (nothing else needed):
 ```bash
-python -m pip install -e ".[dev]"        # core + pytest/ruff
-python -m uninet.demo                     # synthetic traffic → alerts table + ground-truth check
-python -m uninet.demo --serve             # + dashboard & API at http://127.0.0.1:8000
-python -m uninet.training.train_anomaly   # fit the Isolation Forest (optional)
-python -m uninet.eval.metrics             # detection metrics
-python -m uninet.eval.throughput_bench --flows 200000
-python -m pytest                          # 21 tests
+docker compose up            # build + boot; open http://localhost:8000
 ```
 
-Optional extras: `.[pcap]` (scapy), `.[stream]` (Kafka one-way bus),
-`.[ml]` (torch + torch-geometric for the real RGAT), `.[data]` (TII-SSRC-23 loader).
+**or Python:**
+```bash
+pip install -e .             # once
+uninet                       # train-if-needed → run pipeline → open dashboard
+```
 
-Ingest a real capture: `python -m uninet.demo --pcap capture.pcap`.
+Both open the **dashboard at http://localhost:8000** — login **`admin` / `uninet`**
+(override with `UNINET_AUTH_USER` / `UNINET_AUTH_PASSWORD`; `uninet --no-auth` for open dev).
+
+`uninet` flags: `--pcap capture.pcap`, `--seed N`, `--port N`, `--host 0.0.0.0`,
+`--no-open`, `--no-auth`, `--retrain`.
+
+### Other tasks
+
+```bash
+python -m uninet.demo                     # CLI: alerts table + ground-truth check (no server)
+python -m uninet.eval.metrics             # detection metrics
+python -m uninet.eval.throughput_bench --flows 200000
+python -m pytest                          # 24 tests
+```
+
+Optional extras: `.[dev]` (pytest/ruff), `.[pcap]` (scapy), `.[stream]` (Kafka one-way bus),
+`.[ml]` (torch + torch-geometric for the real RGAT), `.[data]` (TII-SSRC-23 loader).
 
 ## Layout
 

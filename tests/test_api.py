@@ -10,6 +10,7 @@ from uninet.streaming.worker import run_pipeline
 @pytest.fixture(scope="module")
 def client():
     settings = load_settings()
+    settings.auth_disabled = True  # exercise the API without the login flow
     result = run_pipeline(SyntheticSource(seed=7), settings, detector=Detector.from_settings(settings))
     app = create_app(result, settings=settings)
     app.config.update(TESTING=True)

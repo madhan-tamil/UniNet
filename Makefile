@@ -12,8 +12,8 @@ install-dev:        ## Install with dev + data extras
 demo:              ## Run the end-to-end synthetic pipeline, print JSON alerts
 	python -m uninet.demo
 
-serve:             ## Run the demo and serve the dashboard + API
-	python -m uninet.demo --serve
+serve up:          ## Single command: train-if-needed -> pipeline -> dashboard (login admin/uninet)
+	uninet
 
 train:             ## Train the anomaly model (+ RGAT if torch is installed)
 	python -m uninet.training.train_anomaly

@@ -1,4 +1,4 @@
-from uninet.demo import main
+from uninet.cli import main
 
 if __name__ == "__main__":
     raise SystemExit(main())

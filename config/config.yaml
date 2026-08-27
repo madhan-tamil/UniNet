@@ -23,3 +23,10 @@ rgat_model: rgat.pt
 
 api_host: 127.0.0.1
 api_port: 8000
+
+# Dashboard login (single operator account). Override with UNINET_AUTH_USER /
+# UNINET_AUTH_PASSWORD / UNINET_SECRET_KEY. Set auth_disabled: true for open dev.
+auth_disabled: false
+auth_user: admin
+auth_password: uninet
+secret_key: uninet-dev-secret-change-me
