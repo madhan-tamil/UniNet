@@ -1,4 +1,4 @@
-# UniNet architecture (Phase 1 + Phase 2)
+# UniNet architecture (Phases 1, 2, 5)
 
 ```
  one-way tap / data diode
@@ -47,8 +47,37 @@ Weights come from `config/config.yaml` (`fusion_weights`, renormalized to sum 1)
 Threat class is taken from the most interpretable signal that fired: rules →
 graph structure → `UNKNOWN` for a pure anomaly (the zero-day path).
 
-## Read-only guarantee
+## Phase 5 — scale-out (`streaming/service.py`)
 
-`src/uninet/assistant/` must not import `socket`, `subprocess`, `requests`,
-`scapy`, … — enforced by `tests/test_assistant_readonly.py`. The API exposes no
-mutating routes; `POST /api/ask` returns `501` until Phase 4.
+```
+        flows ──► partition by hash(local_host) % N ──► shard 0 … shard N-1
+                                                          │        │
+                              each shard: full Phase 1/2 pipeline (own Detector)
+                                                          │        │
+                                                          └── merge_results ──► one PipelineResult
+```
+
+* **`run_sharded(source, workers, executor)`** — `executor="process"` gives real
+  parallelism (each worker rebuilds its own `Detector` + models); `"thread"` is
+  used in tests. Every shard receives a **shared window anchor** (global earliest
+  flow), so partitioning changes wall-clock time only, not detections — verified
+  by `tests/test_service.py`.
+* Partitioning on the local host keeps a host's entire TB-Graph on one worker
+  (no cross-shard graph merges for the same host).
+* **`LiveService`** — background thread that re-runs the pipeline every
+  `--interval` seconds and hot-swaps the dashboard's `PipelineResult`
+  (`uninet --live`). The console polls every 5 s and updates in place.
+* Bench: `python -m uninet.eval.throughput_bench --flows 400000 --workers 4`.
+
+Kafka path: `KafkaBus` is the one-way topic; N `run_sharded` workers map onto N
+consumer-group members in a real deployment.
+
+## "Read-only" — architecture, not the UI
+
+"Read-only" describes the **sensor architecture**: passive tap / data diode, no
+return path, no probing, no payload decryption, no mitigation commands. The
+*console* is fully interactive (filtering, drill-down, live client view).
+
+Enforced: `src/uninet/assistant/` must not import `socket`, `subprocess`,
+`requests`, `scapy`, … (`tests/test_assistant_readonly.py`). The HTTP API exposes
+no mutating routes; `POST /api/ask` returns `501` until Phase 4.

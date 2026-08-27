@@ -1,6 +1,7 @@
 """Streaming throughput benchmark.
 
     python -m uninet.eval.throughput_bench --flows 200000
+    python -m uninet.eval.throughput_bench --flows 400000 --workers 4      # Phase 5 scale-out
 
 Generates a large synthetic flow log and measures end-to-end
 (ingest -> bus -> features -> TB-Graph -> detection) flows/sec. This is the
@@ -16,6 +17,7 @@ from uninet.detection.detector import Detector
 from uninet.ingestion.sources.base import FlowSource
 from uninet.ingestion.sources.synthetic import SyntheticSource
 from uninet.schemas.flow import FlowRecord
+from uninet.streaming.service import run_sharded
 from uninet.streaming.worker import run_pipeline
 
 
@@ -46,20 +48,26 @@ class _Replicated(FlowSource):
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--flows", type=int, default=100_000)
+    p.add_argument("--workers", type=int, default=1, help="Phase 5: parallel shards")
+    p.add_argument("--executor", choices=["process", "thread"], default="process")
     args = p.parse_args(argv)
 
     settings = load_settings()
     source = _Replicated(args.flows)
     n = len(source._records)
 
-    detector = Detector.from_settings(settings)
     t0 = time.perf_counter()
-    result = run_pipeline(source, settings, detector=detector)
+    if args.workers > 1:
+        result = run_sharded(source, settings, workers=args.workers, executor=args.executor)
+        mode = f"{args.workers}x {args.executor}"
+    else:
+        result = run_pipeline(source, settings, detector=Detector.from_settings(settings))
+        mode = "single"
     dt = time.perf_counter() - t0
 
     print(
-        f"flows={n}  windows={result.window_count}  alerts={len(result.alerts)}  "
-        f"time={dt:.2f}s  ->  {n / dt:,.0f} flows/sec"
+        f"flows={n}  mode={mode}  windows={result.window_count}  "
+        f"alerts={len(result.alerts)}  time={dt:.2f}s  ->  {n / dt:,.0f} flows/sec"
     )
     return 0
 

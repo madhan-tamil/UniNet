@@ -9,18 +9,22 @@ alerts. No return path, no probing, no payload decryption.
 
 ---
 
-## Status — Phase 1 + Phase 2 implemented
+## Status — Phases 1, 2, 5 implemented
 
 | Phase | Scope | State |
 |-------|-------|-------|
-| 1 | ingestion → features → TB-Graph → detector → API → dashboard (session login) | ✅ |
+| 1 | ingestion → features → TB-Graph → detector → API → interactive dashboard (session login) | ✅ |
 | 2 | RGAT + anomaly model → fused threat score | ✅ (RGAT via `[ml]` extra; heuristic graph scorer otherwise) |
 | 3 | explainability (feature importance, subgraph, timeline) | scaffold only |
-| 4 | read-only analyst assistant | scaffold only (`POST /api/ask` → 501) |
+| 4 | analyst assistant (reads alerts/evidence/graph only) | scaffold only (`POST /api/ask` → 501) |
+| 5 | scale-out: host-partitioned parallel workers + live console | ✅ (`--workers N`, `--live`) |
 
 On the built-in synthetic scenarios (8 seeds): **precision 1.0, recall 1.0, FP-rate 0.0**;
-single-thread throughput ≈ **24k flows/sec**. These are the defensible numbers — see
-`python -m uninet.eval.metrics`.
+single-thread throughput ≈ **9–24k flows/sec**, ~1.3–2× with `--workers 4`. Defensible
+numbers — see `python -m uninet.eval.metrics` / `...throughput_bench`.
+
+> **"Read-only" is an architecture property** — the sensor is a passive tap / data
+> diode with no return path. The console itself is fully interactive.
 
 ## Run it — one command
 
@@ -39,15 +43,22 @@ Both open the **dashboard at http://localhost:8000** — login **`admin` / `unin
 (override with `UNINET_AUTH_USER` / `UNINET_AUTH_PASSWORD`; `uninet --no-auth` for open dev).
 
 `uninet` flags: `--pcap capture.pcap`, `--seed N`, `--port N`, `--host 0.0.0.0`,
-`--no-open`, `--no-auth`, `--retrain`.
+`--no-open`, `--no-auth`, `--retrain`,
+`--workers N` / `--executor process|thread` (Phase 5 parallel pipeline),
+`--live [--interval S]` (keep refreshing detections — live console).
+
+The dashboard has an **Alerts** tab and a **Clients** tab (per-host view: IPs,
+ports, behavioural fingerprint, alert status). Top stat cards, severity bars and
+threat chips are click-to-filter. TB-Graph nodes are labelled with IPs / domains;
+hover a burst for its ports.
 
 ### Other tasks
 
 ```bash
 python -m uninet.demo                     # CLI: alerts table + ground-truth check (no server)
 python -m uninet.eval.metrics             # detection metrics
-python -m uninet.eval.throughput_bench --flows 200000
-python -m pytest                          # 24 tests
+python -m uninet.eval.throughput_bench --flows 400000 --workers 4
+python -m pytest                          # 28 tests
 ```
 
 Optional extras: `.[dev]` (pytest/ruff), `.[pcap]` (scapy), `.[stream]` (Kafka one-way bus),

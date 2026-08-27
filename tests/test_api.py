@@ -35,6 +35,36 @@ def test_graph_for_host(client):
     host = alerts[0]["src_host"]
     view = client.get(f"/api/graph?host={host}").get_json()
     assert "nodes" in view and "edges" in view
+    burst = next((n for n in view["nodes"] if n["type"] == "burst"), None)
+    assert burst and "peer" in burst["attrs"]  # IP info is on graph nodes
+
+
+def test_hosts_endpoint(client):
+    hosts = client.get("/api/hosts").get_json()
+    assert isinstance(hosts, list) and hosts
+    h = hosts[0]
+    for key in ("ip", "flows", "bursts", "peer_count", "dst_ports", "fingerprint"):
+        assert key in h
+    # at least one client should carry an alert badge
+    assert any(x["alert"] for x in hosts)
+
+
+def test_config_endpoint(client):
+    c = client.get("/api/config").get_json()
+    assert c["port"] and c["base_url"].startswith("http://")
+
+
+def test_stats_carries_version(client):
+    assert isinstance(client.get("/api/stats").get_json()["version"], int)
+
+
+def test_stream_emits_version(client):
+    resp = client.get("/api/stream", buffered=False)
+    assert resp.status_code == 200
+    assert resp.mimetype == "text/event-stream"
+    first = next(resp.response).decode()  # generator yields the current version at once
+    resp.close()
+    assert '"version"' in first
 
 
 def test_ask_is_blocked(client):

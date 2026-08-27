@@ -65,6 +65,9 @@ class GraphBuilder:
             byte_count=float(b.byte_count),
             mean_flow_bytes=b.mean_flow_bytes,
             unique_dst_ports=float(b.unique_dst_ports),
+            dst_ports=list(b.dst_ports[:12]),
+            domains=list(b.domains[:8]),
+            protocols=list(b.protocols),
             intra_periodicity=b.intra_periodicity,
             dir_code=_DIR_CODE[b.direction],
         )

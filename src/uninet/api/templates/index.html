@@ -4,58 +4,91 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>UniNet · Threat Console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
 </head>
 <body>
-<header class="topbar">
-  <div class="brand">
-    <span class="logo-dot"></span>
-    <div>
-      <strong>UniNet</strong>
-      <span class="sub">Unidirectional Threat Console</span>
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="logo-dot"></span>
+      <div>
+        <strong>UniNet</strong>
+        <span class="sub">Unidirectional Threat Console</span>
+      </div>
     </div>
-    <span class="pill ro">read-only</span>
-  </div>
-  <div class="topbar-right">
-    <span id="refreshed" class="muted">—</span>
-    <span class="user-chip">{{ user }}</span>
-    <a class="btn-ghost" href="{{ url_for('auth.logout') }}">Sign out</a>
-  </div>
-</header>
 
-<section class="stat-row" id="stat-row">
-  <div class="stat"><div class="stat-k" id="s-flows">—</div><div class="stat-l">flows</div></div>
-  <div class="stat"><div class="stat-k" id="s-windows">—</div><div class="stat-l">windows</div></div>
-  <div class="stat"><div class="stat-k" id="s-graph">—</div><div class="stat-l">TB-graph (nodes / edges)</div></div>
-  <div class="stat"><div class="stat-k" id="s-alerts">—</div><div class="stat-l">alerts</div>
-    <div class="sev-mini" id="s-sevmini"></div></div>
-  <div class="stat grow"><div class="stat-l">threats seen</div><div class="chip-row" id="s-threats"></div></div>
-</section>
+    <nav class="nav">
+      <button class="tab active" data-view="overview">Overview</button>
+      <button class="tab" data-view="alerts">Alerts</button>
+      <button class="tab" data-view="hosts">Clients</button>
+    </nav>
 
-<main class="layout">
-  <section class="panel">
-    <div class="panel-head"><h2>Alerts</h2><span class="muted" id="alert-count"></span></div>
-    <div id="alert-list" class="alert-list">loading…</div>
-  </section>
-
-  <section class="panel">
-    <div class="panel-head"><h2>Detail</h2><span class="muted" id="detail-host"></span></div>
-    <div id="detail-empty" class="muted pad">Select an alert to see its evidence and TB-Graph.</div>
-    <div id="detail" hidden>
-      <div class="verdict" id="verdict"></div>
-      <div class="score-bars" id="score-bars"></div>
-      <h3>Evidence</h3>
-      <div id="evidence" class="evidence"></div>
-      <h3>TB-Graph <span class="muted" id="graph-legend">host · burst · domain</span></h3>
-      <svg id="graph" viewBox="0 0 520 380" preserveAspectRatio="xMidYMid meet"></svg>
-      <p class="muted edge-key">
-        <b style="color:#ff9f45">—</b> periodic &nbsp;
-        <b style="color:#ff5470">—</b> direction change &nbsp;
-        <b style="color:#5b6b93">—</b> other
-      </p>
+    <div class="sidebar-foot">
+      <span class="pill ro" title="Passive sensor architecture: no return path to the monitored network. The console itself is fully interactive.">passive arch</span>
+      <a id="port-link" class="port-link" href="#" target="_blank" rel="noopener" title="dashboard endpoint">—</a>
+      <span id="live-dot" class="live-dot" title="real-time stream">live</span>
+      <div class="op-row">
+        <span class="user-chip">{{ user }}</span>
+        <a class="btn-ghost" href="{{ url_for('auth.logout') }}">Sign out</a>
+      </div>
     </div>
-  </section>
-</main>
+  </aside>
+
+  <div class="content">
+    <header class="topbar">
+      <h1 id="view-title">Overview</h1>
+      <div class="topbar-right">
+        <div class="filterbar" id="filterbar" hidden>
+          <span id="filter-label"></span>
+          <button id="filter-clear" class="btn-ghost">clear</button>
+        </div>
+        <span id="refreshed" class="mono muted">—</span>
+      </div>
+    </header>
+
+    <section class="stat-row" id="stat-row">
+      <button class="stat" data-filter-clear="1"><div class="stat-k" id="s-flows">—</div><div class="stat-l">flows</div></button>
+      <button class="stat" data-filter-clear="1"><div class="stat-k" id="s-windows">—</div><div class="stat-l">windows</div></button>
+      <button class="stat" data-goto="hosts"><div class="stat-k" id="s-hosts">—</div><div class="stat-l">clients / hosts</div></button>
+      <button class="stat" data-goto="alerts"><div class="stat-k" id="s-graph">—</div><div class="stat-l">TB-graph n / e</div></button>
+      <button class="stat" data-goto="alerts"><div class="stat-k" id="s-alerts">—</div><div class="stat-l">alerts</div>
+        <div class="sev-mini" id="s-sevmini"></div></button>
+      <div class="stat grow"><div class="stat-l">threats — click to filter</div><div class="chip-row" id="s-threats"></div></div>
+    </section>
+
+    <main class="master-detail">
+      <section class="panel list-pane">
+        <div class="panel-head">
+          <h2 id="list-title">Alerts</h2>
+          <span class="muted mono" id="list-count"></span>
+        </div>
+        <div id="alert-list" class="card-list">loading…</div>
+        <div id="host-list" class="card-list" hidden></div>
+      </section>
+
+      <section class="panel detail-pane">
+        <div class="panel-head"><h2>Detail</h2><span class="muted mono" id="detail-host"></span></div>
+        <div id="detail-empty" class="muted pad">Select an alert or client to inspect.</div>
+        <div id="detail" hidden>
+          <div class="verdict" id="verdict"></div>
+          <div class="score-bars" id="score-bars"></div>
+          <div id="host-meta" class="host-meta" hidden></div>
+          <h3 id="ev-head" hidden>Evidence</h3>
+          <div id="evidence" class="evidence"></div>
+          <h3>TB-Graph <span class="muted">IPs / domains labelled · hover a burst for ports</span></h3>
+          <svg id="graph" viewBox="0 0 540 400" preserveAspectRatio="xMidYMid meet"></svg>
+          <p class="muted edge-key">
+            <b style="color:#ff9500">—</b> periodic
+            <b style="color:#ff3b3b">—</b> direction change
+            <b style="color:#5b6b93">—</b> other
+          </p>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
 
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>

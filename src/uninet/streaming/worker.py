@@ -35,6 +35,23 @@ class PipelineResult:
     def alerts_json(self) -> list[dict]:
         return [a.model_dump(mode="json") for a in self.alerts]
 
+    def merge(self, other: PipelineResult) -> PipelineResult:
+        """Fold another result in. Safe when partitions are host-disjoint."""
+        self.alerts.extend(other.alerts)
+        self.features.extend(other.features)
+        self.graph.merge(other.graph.g)
+        self.flow_count += other.flow_count
+        self.window_count = max(self.window_count, other.window_count)
+        return self
+
+
+def merge_results(results: list[PipelineResult]) -> PipelineResult:
+    out = PipelineResult()
+    for r in results:
+        out.merge(r)
+    out.alerts.sort(key=lambda a: -a.confidence)
+    return out
+
 
 def _drain(source: FlowSource, bus: MessageBus, topic: str) -> list[FlowRecord]:
     """Publish every record onto the bus, then read it all back (one-way)."""
@@ -52,6 +69,7 @@ def run_pipeline(
     detector: Detector | None = None,
     profile_store: ProfileStore | None = None,
     use_bus: bool = True,
+    window_anchor: float | None = None,
 ) -> PipelineResult:
     s = settings or load_settings()
     detector = detector or Detector.from_settings(s)
@@ -73,7 +91,7 @@ def run_pipeline(
     graph_builder = GraphBuilder()
     extractor = FeatureExtractor(s.window_seconds)
 
-    t0 = flows[0].start_ts
+    t0 = window_anchor if window_anchor is not None else flows[0].start_ts
     t_end = flows[-1].start_ts
     win = float(s.window_seconds)
 
