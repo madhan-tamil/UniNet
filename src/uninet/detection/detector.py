@@ -15,6 +15,7 @@ from uninet.config import Settings, load_settings
 from uninet.detection.anomaly_model import AnomalyModel
 from uninet.detection.rgat_model import GraphScore, GraphThreatScorer
 from uninet.detection.rules import RuleEngine, RuleHit
+from uninet.detection.sequence_model import SequenceScore, SequenceThreatScorer
 from uninet.detection.threat_types import ThreatType
 from uninet.features.extractor import HostWindowFeatures
 from uninet.schemas.alert import Alert, Evidence, EvidenceKind, Severity
@@ -44,11 +45,13 @@ class Detector:
         rule_engine: RuleEngine | None = None,
         anomaly_model: AnomalyModel | None = None,
         graph_scorer: GraphThreatScorer | None = None,
+        sequence_scorer: SequenceThreatScorer | None = None,
     ) -> None:
         self.cfg = config or DetectorConfig()
         self.rules = rule_engine or RuleEngine()
         self.anomaly = anomaly_model or AnomalyModel()
         self.graph_scorer = graph_scorer or GraphThreatScorer()
+        self.sequence_scorer = sequence_scorer or SequenceThreatScorer()
 
     # ------------------------------------------------------------------ #
     @classmethod
@@ -58,6 +61,7 @@ class Detector:
             config=DetectorConfig.from_settings(s),
             anomaly_model=AnomalyModel.load_or_none(s.model_path_anomaly) or AnomalyModel(),
             graph_scorer=GraphThreatScorer(s.model_path_rgat),
+            sequence_scorer=SequenceThreatScorer(s.model_path_sequence),
         )
 
     # ------------------------------------------------------------------ #
@@ -81,6 +85,10 @@ class Detector:
             else GraphScore(0.0, ThreatType.BENIGN, [], "no graph supplied")
         )
 
+        # 4th signal: temporal read of the burst sequence. Additive evidence only -
+        # it does not enter the fusion math or the threat-class decision.
+        seq: SequenceScore = self.sequence_scorer.score(feats.bursts, feats.host)
+
         threat = self._decide_threat(rule_threat, gs, anomaly_score)
         if threat in (ThreatType.BENIGN,):
             return None
@@ -102,7 +110,7 @@ class Detector:
         if fused < self.cfg.alert_threshold:
             return None
 
-        evidence = self._collect_evidence(rule_hits, anomaly_score, baseline_novelty, gs)
+        evidence = self._collect_evidence(rule_hits, anomaly_score, baseline_novelty, gs, seq)
         return Alert(
             window_start=feats.window_start,
             window_end=feats.window_end,
@@ -119,6 +127,7 @@ class Detector:
                 "rule": round(rule_score, 4),
                 "anomaly": round(anomaly_score, 4),
                 "graph": round(gs.score, 4),
+                "sequence": round(seq.score, 4),
             },
         )
 
@@ -148,7 +157,8 @@ class Detector:
 
     @staticmethod
     def _collect_evidence(
-        rule_hits: list[RuleHit], anomaly_score: float, baseline_novelty: float, gs: GraphScore
+        rule_hits: list[RuleHit], anomaly_score: float, baseline_novelty: float,
+        gs: GraphScore, seq: SequenceScore | None = None
     ) -> list[Evidence]:
         ev = [h.evidence for h in rule_hits]
         if anomaly_score >= 0.6:
@@ -164,6 +174,13 @@ class Detector:
                 detail=gs.rationale or f"TB-Graph suspicion {gs.score:.2f}",
                 score=gs.score,
                 data={"top_nodes": gs.top_nodes, "hint": gs.threat_hint.value},
+            ))
+        if seq is not None and seq.score >= 0.5:
+            ev.append(Evidence(
+                kind=EvidenceKind.ML, name="temporal_sequence",
+                detail=seq.rationale or f"burst-sequence suspicion {seq.score:.2f}",
+                score=seq.score,
+                data={**seq.features, "hint": seq.threat_hint.value},
             ))
         return ev
 

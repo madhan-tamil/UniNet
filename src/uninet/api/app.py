@@ -16,7 +16,7 @@ Endpoints (GET unless noted; session required except /api/health + login):
     /api/alerts/<id>      one Alert
     /api/explain/<id>     evidence breakdown for one Alert
     /api/graph?host=IP    TB-Graph view (subgraph for a host, or whole graph)
-    /api/ask   (POST)     reserved for the Phase 4 analyst assistant -> 501
+    /api/ask   (POST)     read-only analyst assistant  {question, alert_id?}
 """
 from __future__ import annotations
 
@@ -34,7 +34,6 @@ from uninet.api.auth import is_authenticated, login_required
 from uninet.config import Settings, load_settings
 from uninet.features.fingerprint import behavioural_fingerprint
 from uninet.streaming.worker import PipelineResult, run_pipeline
-
 
 # --- real-time push (Server-Sent Events) ------------------------------ #
 # The console subscribes to /api/stream; every set_result() bumps a version
@@ -234,11 +233,11 @@ def create_app(result: PipelineResult | None = None, settings: Settings | None =
         a = app.config["ALERTS_BY_ID"].get(alert_id)
         if not a:
             return jsonify(error="not found"), 404
-        return jsonify(
-            alert_id=a.alert_id, threat_type=a.threat_type.value, confidence=a.confidence,
-            fused_from=a.scores, evidence=[e.model_dump(mode="json") for e in a.evidence],
-            graph_anchors=a.graph_node_ids,
-        )
+        from uninet.explainability.explainer import explain_alert
+
+        payload = explain_alert(a)
+        payload["evidence"] = [e.model_dump(mode="json") for e in a.evidence]
+        return jsonify(payload)
 
     @app.get("/api/graph")
     @login_required
@@ -252,10 +251,25 @@ def create_app(result: PipelineResult | None = None, settings: Settings | None =
     @app.post("/api/ask")
     @login_required
     def ask():
-        return jsonify(
-            error="analyst assistant is Phase 4",
-            note="passive architecture: assistant will read alerts/evidence/graph only",
-        ), 501
+        """Read-only analyst assistant. Body: {question, alert_id?}."""
+        from uninet.assistant import ask as assistant_ask
+        from uninet.assistant import build_context
+
+        body = request.get_json(silent=True) or {}
+        question = (body.get("question") or "").strip()
+        if not question:
+            return jsonify(error="missing 'question'"), 400
+
+        r: PipelineResult = app.config["RESULT"]
+        alert_id = body.get("alert_id")
+        a = (app.config["ALERTS_BY_ID"].get(alert_id) if alert_id
+             else max(r.alerts, key=lambda x: x.confidence, default=None))
+        if a is None:
+            return jsonify(error="no alert to explain"), 404
+
+        view = r.graph.to_view(r.graph.subgraph_for_host(a.src_host))
+        ctx = build_context(a, view)
+        return jsonify(assistant_ask(question, ctx))
 
     return app
 

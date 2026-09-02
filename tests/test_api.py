@@ -67,5 +67,26 @@ def test_stream_emits_version(client):
     assert '"version"' in first
 
 
-def test_ask_is_blocked(client):
-    assert client.post("/api/ask", json={"q": "hi"}).status_code == 501
+def test_ask_requires_question(client):
+    assert client.post("/api/ask", json={}).status_code == 400
+
+
+def test_ask_answers_read_only(client):
+    r = client.post("/api/ask", json={"question": "why is this an alert?"})
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["read_only"] is True
+    assert body["intent"] == "why"
+    assert len(body["answer"]) > 30
+    assert body["refs"]["alert_id"]
+
+
+def test_ask_intent_routing(client):
+    for q, want in [
+        ("how confident are you?", "confidence"),
+        ("which bursts caused this?", "graph"),
+        ("what should I do next?", "next"),
+        ("who is the host talking to?", "peers"),
+    ]:
+        got = client.post("/api/ask", json={"question": q}).get_json()["intent"]
+        assert got == want, (q, got)

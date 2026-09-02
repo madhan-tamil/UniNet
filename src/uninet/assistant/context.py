@@ -19,7 +19,7 @@ class AssistantContext:
     subgraph: dict = field(default_factory=dict)
 
     def as_prompt_context(self) -> str:
-        """Flat text block a Phase 4 LLM layer can be grounded on (read-only)."""
+        """Flat text block the assistant (or a future LLM layer) is grounded on."""
         e = self.explanation
         lines = [
             f"ALERT {self.alert['alert_id']}: {e['verdict']} conf={e['confidence']}",

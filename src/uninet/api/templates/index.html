@@ -1,93 +1,406 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>UniNet · Threat Console</title>
+<title>UniNet · Obsidian Protocol</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  darkMode: "class",
+  theme: { extend: {
+    colors: {
+      "background": "#0d1515", "surface": "#0d1515", "surface-dim": "#0d1515",
+      "surface-bright": "#333b3b",
+      "surface-container-lowest": "#080f10", "surface-container-low": "#151d1e",
+      "surface-container": "#192122", "surface-container-high": "#232b2c",
+      "surface-container-highest": "#2e3637", "surface-variant": "#2e3637",
+      "on-surface": "#dce4e4", "on-surface-variant": "#b9cacb", "on-background": "#dce4e4",
+      "outline": "#849495", "outline-variant": "#3a494b",
+      "primary": "#e1fdff", "primary-container": "#00f2ff",
+      "primary-fixed": "#74f5ff", "primary-fixed-dim": "#00dbe7",
+      "on-primary": "#00363a", "on-primary-fixed": "#002022", "on-primary-container": "#006a71",
+      "inverse-primary": "#00696f", "surface-tint": "#00dbe7",
+      "secondary": "#c3c6d3", "secondary-container": "#454954",
+      "tertiary": "#fff6e4", "tertiary-container": "#fed83a",
+      "tertiary-fixed": "#ffe173", "tertiary-fixed-dim": "#e8c423",
+      "on-tertiary-container": "#725e00",
+      "error": "#ffb4ab", "error-container": "#93000a",
+      "on-error": "#690005", "on-error-container": "#ffdad6",
+    },
+    borderRadius: { "DEFAULT": "0.125rem", "lg": "0.25rem", "xl": "0.5rem", "2xl": "0.75rem", "full": "9999px" },
+    spacing: { "unit": "4px", "gutter": "16px", "panel-gap": "12px", "container-padding": "24px" },
+    fontFamily: {
+      "body-md": ["Inter", "ui-sans-serif", "system-ui"],
+      "headline-md": ["Inter", "ui-sans-serif", "system-ui"],
+      "headline-lg": ["Inter", "ui-sans-serif", "system-ui"],
+      "data-md": ["'JetBrains Mono'", "ui-monospace", "monospace"],
+      "data-lg": ["'JetBrains Mono'", "ui-monospace", "monospace"],
+      "label-caps": ["'JetBrains Mono'", "ui-monospace", "monospace"],
+    },
+    fontSize: {
+      "body-md": ["16px", { lineHeight: "24px" }],
+      "headline-md": ["24px", { lineHeight: "32px", letterSpacing: "-0.01em", fontWeight: "600" }],
+      "headline-lg": ["32px", { lineHeight: "40px", letterSpacing: "-0.02em", fontWeight: "700" }],
+      "data-md": ["14px", { lineHeight: "20px" }],
+      "data-lg": ["18px", { lineHeight: "28px", fontWeight: "500" }],
+      "label-caps": ["12px", { lineHeight: "16px", letterSpacing: "0.1em", fontWeight: "700" }],
+    },
+  } },
+};
+</script>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
 </head>
-<body>
-<div class="shell">
-  <aside class="sidebar">
-    <div class="brand">
-      <span class="logo-dot"></span>
-      <div>
-        <strong>UniNet</strong>
-        <span class="sub">Unidirectional Threat Console</span>
+<body class="bg-surface font-body-md text-on-surface dark">
+
+<!-- ============ icon rail ============ -->
+<aside class="fixed left-0 top-0 h-full w-[72px] bg-surface-container-low z-50 flex flex-col items-center py-6 border-r border-outline-variant/20">
+  <div class="mb-10 w-9 h-9 rounded-lg grid place-items-center bg-primary-container/15 border border-primary-container/40 text-primary-fixed-dim">
+    <span class="material-symbols-outlined text-[22px]">radar</span>
+  </div>
+  <nav id="rail" class="w-full flex flex-col gap-unit">
+    <button class="nav-icon group relative flex items-center justify-center w-full h-14 text-on-surface-variant transition-all is-active" data-screen="workspace">
+      <span class="material-symbols-outlined">grid_view</span><span class="nav-tip">WORKSPACE</span>
+    </button>
+    <button class="nav-icon group relative flex items-center justify-center w-full h-14 text-on-surface-variant transition-all" data-screen="graph">
+      <span class="material-symbols-outlined">account_tree</span><span class="nav-tip">GRAPH_EXPLORER</span>
+    </button>
+    <button class="nav-icon group relative flex items-center justify-center w-full h-14 text-on-surface-variant transition-all" data-screen="ai">
+      <span class="material-symbols-outlined">psychology</span><span class="nav-tip">AI_INTELLIGENCE</span>
+    </button>
+  </nav>
+  <a href="{{ url_for('auth.logout') }}" class="nav-icon mt-auto group relative flex items-center justify-center w-full h-14 text-on-surface-variant" title="Sign out">
+    <span class="material-symbols-outlined">logout</span><span class="nav-tip">SIGN OUT · {{ user }}</span>
+  </a>
+</aside>
+
+<div class="pl-[72px]">
+  <!-- ============ shared header ============ -->
+  <header class="fixed top-0 left-[72px] right-0 h-16 bg-surface/60 backdrop-blur-2xl border-b border-outline-variant/10 z-40 flex items-center px-container-padding justify-between gap-gutter">
+    <div class="flex items-center gap-gutter shrink-0">
+      <div class="flex flex-col">
+        <span class="font-label-caps text-on-surface-variant text-[10px]">OBSIDIAN_PROTOCOL</span>
+        <span id="investigation-id" class="font-data-md text-primary-fixed-dim">SEC_AUTH::ACTIVE</span>
+      </div>
+      <div class="h-8 w-px bg-outline-variant/30"></div>
+      <div class="flex items-center gap-2 px-3 py-1 bg-surface-container-high rounded-full">
+        <span id="live-dot" class="w-2 h-2 rounded-full bg-outline"></span>
+        <span id="live-label" class="font-label-caps text-[11px] text-on-surface">CONNECTING</span>
       </div>
     </div>
-
-    <nav class="nav">
-      <button class="tab active" data-view="overview">Overview</button>
-      <button class="tab" data-view="alerts">Alerts</button>
-      <button class="tab" data-view="hosts">Clients</button>
-    </nav>
-
-    <div class="sidebar-foot">
-      <span class="pill ro" title="Passive sensor architecture: no return path to the monitored network. The console itself is fully interactive.">passive arch</span>
-      <a id="port-link" class="port-link" href="#" target="_blank" rel="noopener" title="dashboard endpoint">—</a>
-      <span id="live-dot" class="live-dot" title="real-time stream">live</span>
-      <div class="op-row">
-        <span class="user-chip">{{ user }}</span>
-        <a class="btn-ghost" href="{{ url_for('auth.logout') }}">Sign out</a>
+    <div class="flex-1 max-w-xl">
+      <div class="relative flex items-center">
+        <span class="material-symbols-outlined absolute left-3 text-on-surface-variant text-[18px]">search</span>
+        <input id="search" type="text" placeholder="QUERY_DATA_LAKE..."
+          class="w-full bg-surface-container-lowest/50 border-b border-outline-variant/50 focus:border-primary-container px-10 py-2 font-data-md text-on-surface placeholder:text-outline/50 outline-none transition-all" />
+        <button id="search-clear" class="material-symbols-outlined absolute right-3 text-on-surface-variant text-[16px] hidden hover:text-on-surface">close</button>
       </div>
     </div>
-  </aside>
-
-  <div class="content">
-    <header class="topbar">
-      <h1 id="view-title">Overview</h1>
-      <div class="topbar-right">
-        <div class="filterbar" id="filterbar" hidden>
-          <span id="filter-label"></span>
-          <button id="filter-clear" class="btn-ghost">clear</button>
-        </div>
-        <span id="refreshed" class="mono muted">—</span>
+    <div class="flex items-center gap-6 shrink-0">
+      <div class="flex flex-col items-end"><span class="font-label-caps text-[10px] text-on-surface-variant">SYNC</span>
+        <span id="refreshed" class="font-data-md text-primary-fixed-dim text-[12px]">—</span></div>
+      <div class="flex flex-col items-end"><span class="font-label-caps text-[10px] text-on-surface-variant">ALERTS</span>
+        <span id="hdr-alerts" class="font-data-md text-primary-fixed-dim text-[12px]">—</span></div>
+      <div class="w-8 h-8 rounded-full bg-primary grid place-items-center shadow-[0_0_10px_rgba(225,253,255,0.3)]">
+        <span class="material-symbols-outlined text-on-primary text-[18px]">person</span>
       </div>
-    </header>
+    </div>
+  </header>
 
-    <section class="stat-row" id="stat-row">
-      <button class="stat" data-filter-clear="1"><div class="stat-k" id="s-flows">—</div><div class="stat-l">flows</div></button>
-      <button class="stat" data-filter-clear="1"><div class="stat-k" id="s-windows">—</div><div class="stat-l">windows</div></button>
-      <button class="stat" data-goto="hosts"><div class="stat-k" id="s-hosts">—</div><div class="stat-l">clients / hosts</div></button>
-      <button class="stat" data-goto="alerts"><div class="stat-k" id="s-graph">—</div><div class="stat-l">TB-graph n / e</div></button>
-      <button class="stat" data-goto="alerts"><div class="stat-k" id="s-alerts">—</div><div class="stat-l">alerts</div>
-        <div class="sev-mini" id="s-sevmini"></div></button>
-      <div class="stat grow"><div class="stat-l">threats — click to filter</div><div class="chip-row" id="s-threats"></div></div>
+  <main class="relative pt-16 h-screen bg-surface overflow-hidden">
+    <div class="grid-bg absolute inset-0 z-0 pointer-events-none"></div>
+
+    <!-- ================= SCREEN 1 · WORKSPACE ================= -->
+    <section id="screen-workspace" class="screen relative z-10 h-[calc(100vh-64px)]">
+      <div class="flex w-full h-full p-container-padding gap-panel-gap">
+
+        <aside class="w-80 flex flex-col bg-surface-container-highest/60 backdrop-blur-md rounded-lg overflow-hidden flex-shrink-0 border border-outline-variant/10">
+          <div class="flex items-center justify-between p-3 bg-surface-container-low/80">
+            <span class="font-label-caps text-on-surface-variant text-[10px] flex items-center gap-2">
+              <span class="material-symbols-outlined text-[16px]">queue</span><span id="queue-title">ALERT QUEUE</span>
+            </span>
+            <div class="flex items-center gap-2">
+              <span id="list-count" class="font-data-md text-[11px] text-outline"></span>
+              <button id="queue-mode" title="toggle alerts / hosts" class="material-symbols-outlined text-[14px] text-outline hover:text-on-surface">swap_horiz</button>
+              <button id="queue-filter" title="cycle severity filter" class="material-symbols-outlined text-[14px] text-outline hover:text-on-surface">filter_list</button>
+              <button id="queue-clear" title="clear filters" class="material-symbols-outlined text-[14px] text-outline hover:text-on-surface">close</button>
+            </div>
+          </div>
+          <div id="filterbar" class="hidden items-center justify-between gap-2 px-3 py-2 bg-primary-container/10 border-y border-primary-container/20">
+            <span id="filter-label" class="font-data-md text-[11px] text-primary-fixed-dim"></span>
+            <button id="filter-clear" class="font-label-caps text-[10px] text-on-surface-variant hover:text-on-surface">CLEAR</button>
+          </div>
+          <div id="alert-list" class="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar">
+            <div class="p-3 font-data-md text-[12px] text-outline">loading…</div>
+          </div>
+          <div id="host-list" class="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar hidden"></div>
+        </aside>
+
+        <section class="flex-1 flex flex-col gap-panel-gap min-w-0">
+          <section class="flex-1 bg-surface-container-highest/40 backdrop-blur-lg rounded-lg flex flex-col relative overflow-hidden border border-outline-variant/10">
+            <div class="flex justify-between items-start p-4 border-b border-outline-variant/10">
+              <div>
+                <h2 class="font-headline-md text-on-surface text-[18px] flex items-center gap-2">
+                  <span class="material-symbols-outlined text-primary-fixed-dim">crisis_alert</span> ALERT DETAIL
+                </h2>
+                <div id="ws-target" class="font-data-md text-on-surface-variant text-[12px] mt-1">—</div>
+              </div>
+              <span id="new-threat-badge" class="hidden bg-error/10 border border-error/30 text-error px-3 py-1.5 rounded-full font-label-caps text-[10px] flex items-center gap-2 shadow-[0_0_15px_rgba(255,180,171,0.25)] animate-pulse">
+                <span class="w-1.5 h-1.5 rounded-full bg-error"></span> NEW THREAT EVENT DETECTED
+              </span>
+            </div>
+            <div id="ws-detail-empty" class="flex-1 grid place-items-center font-data-md text-[12px] text-outline">SELECT AN ALERT OR HOST FROM THE QUEUE</div>
+            <div id="ws-detail" class="hidden flex-1 overflow-y-auto p-5 flex flex-col gap-5 custom-scrollbar">
+              <div>
+                <div id="ws-verdict" class="font-data-lg text-[18px] text-on-surface"></div>
+                <div id="ws-summary" class="font-data-md text-[13px] text-on-surface-variant mt-2 leading-relaxed"></div>
+              </div>
+              <div>
+                <div class="font-label-caps text-[10px] text-on-surface-variant mb-2 flex items-center gap-2">EVIDENCE<span class="h-px flex-1 bg-outline-variant/20"></span></div>
+                <div id="ws-evidence" class="flex flex-col gap-2"></div>
+              </div>
+              <div class="mt-auto flex gap-2">
+                <button id="ws-open-graph" class="flex-1 h-10 bg-primary-fixed-dim text-on-primary-fixed font-label-caps text-[10px] rounded flex items-center justify-center gap-2 hover:bg-primary-fixed transition-colors"><span class="material-symbols-outlined text-[16px]">account_tree</span> OPEN GRAPH EXPLORER</button>
+                <button id="ws-open-ai" class="flex-1 h-10 bg-transparent border border-primary-fixed-dim/30 text-primary-fixed-dim font-label-caps text-[10px] rounded flex items-center justify-center gap-2 hover:bg-primary-fixed-dim/10 transition-colors"><span class="material-symbols-outlined text-[16px]">psychology</span> ASK NEXUS AI</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="h-32 bg-surface-container-highest/60 backdrop-blur-md rounded-lg p-4 flex flex-col justify-between flex-shrink-0 border border-outline-variant/10">
+            <div class="flex items-center justify-between">
+              <div class="font-label-caps text-[11px] text-primary-fixed-dim">ATTACK STORYLINE</div>
+              <div id="timeline-range" class="font-data-md text-[12px] text-on-surface-variant">—</div>
+            </div>
+            <div id="timeline-track" class="relative w-full h-8 flex items-center">
+              <div class="absolute inset-x-0 h-1 bg-surface-container-low rounded-full"></div>
+              <div id="timeline-fill" class="absolute left-0 h-1 bg-primary-container/50 rounded-l-full" style="width:0%"></div>
+            </div>
+            <div class="flex items-center justify-between">
+              <button id="storyline-play" class="bg-primary text-on-primary font-label-caps text-[10px] px-4 py-1.5 rounded hover:bg-primary-fixed transition-colors flex items-center gap-1">
+                <span id="storyline-play-icon" class="material-symbols-outlined text-[14px]">play_arrow</span> <span id="storyline-play-label">PLAY STORYLINE</span>
+              </button>
+              <div class="flex items-center gap-2">
+                <span id="timeline-legend" class="font-data-md text-[11px] text-on-surface-variant mr-2"></span>
+                <button id="story-prev" class="w-8 h-8 rounded-full border border-outline-variant text-on-surface-variant hover:text-on-surface hover:bg-surface-container grid place-items-center transition-all"><span class="material-symbols-outlined text-[16px]">skip_previous</span></button>
+                <button id="story-pause" class="w-8 h-8 rounded-full border border-outline-variant text-on-surface-variant hover:text-on-surface hover:bg-surface-container grid place-items-center transition-all"><span class="material-symbols-outlined text-[16px]">pause</span></button>
+                <button id="story-next" class="w-8 h-8 rounded-full border border-outline-variant text-on-surface-variant hover:text-on-surface hover:bg-surface-container grid place-items-center transition-all"><span class="material-symbols-outlined text-[16px]">skip_next</span></button>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <aside class="w-80 flex flex-col gap-panel-gap flex-shrink-0">
+          <div class="bg-surface-container-highest/60 backdrop-blur-md rounded-lg p-4 border border-outline-variant/10">
+            <div class="font-label-caps text-on-surface-variant text-[10px] mb-4 border-b border-outline-variant/30 pb-2">FUSION SCORES</div>
+            <div id="score-bars" class="space-y-4"><div class="font-data-md text-[12px] text-outline">—</div></div>
+            <div id="verdict" class="mt-4 pt-3 border-t border-outline-variant/20 font-data-md text-[12px] text-on-surface-variant"></div>
+          </div>
+          <div class="flex-1 bg-surface-container-highest/60 backdrop-blur-md rounded-lg p-4 border border-outline-variant/10 flex flex-col gap-3 relative overflow-hidden">
+            <div class="absolute -right-10 -top-10 w-32 h-32 bg-primary-container/10 rounded-full blur-2xl pointer-events-none"></div>
+            <div class="font-label-caps text-primary-fixed-dim text-[10px] flex items-center gap-2">
+              <span class="material-symbols-outlined text-[14px]">travel_explore</span> INSPECT
+            </div>
+            <div class="font-data-md text-on-surface text-[12px] bg-surface-container-low p-2 rounded border border-outline-variant/30">
+              <div class="text-on-surface-variant mb-1">CONTEXT TARGET:</div>
+              <div><span class="text-primary-fixed-dim">ALERT:</span> <span id="ai-alert">—</span></div>
+              <div><span class="text-primary-fixed-dim">HOST:</span> <span id="ai-host">—</span></div>
+            </div>
+            <button class="ws-jump w-full text-left p-2 rounded bg-surface-container hover:bg-surface-container-high border border-outline-variant/20 hover:border-primary-fixed-dim/50 transition-colors text-[13px] text-on-surface flex justify-between items-center" data-to="graph">
+              View traffic-burst graph
+              <span class="material-symbols-outlined text-[14px] text-primary-fixed-dim">account_tree</span>
+            </button>
+            <button class="ws-jump w-full text-left p-2 rounded bg-surface-container hover:bg-surface-container-high border border-outline-variant/20 hover:border-primary-fixed-dim/50 transition-colors text-[13px] text-on-surface flex justify-between items-center" data-to="ai">
+              Open AI intelligence chat
+              <span class="material-symbols-outlined text-[14px] text-primary-fixed-dim">psychology</span>
+            </button>
+            <p class="mt-auto font-data-md text-[11px] text-on-surface-variant/70 leading-relaxed">
+              The traffic-burst graph and the Nexus AI assistant each have a dedicated workspace — use the rail on the left or the buttons above.
+            </p>
+          </div>
+        </aside>
+      </div>
     </section>
 
-    <main class="master-detail">
-      <section class="panel list-pane">
-        <div class="panel-head">
-          <h2 id="list-title">Alerts</h2>
-          <span class="muted mono" id="list-count"></span>
-        </div>
-        <div id="alert-list" class="card-list">loading…</div>
-        <div id="host-list" class="card-list" hidden></div>
-      </section>
+    <!-- ================= SCREEN 2 · GRAPH EXPLORER ================= -->
+    <section id="screen-graph" class="screen hidden relative z-10 h-[calc(100vh-64px)]">
+      <div class="flex w-full h-full relative">
+        <div class="flex-1 relative bg-surface-dim overflow-hidden" id="gx-container">
+          <div class="absolute inset-0 grid-bg opacity-[0.04] pointer-events-none"></div>
 
-      <section class="panel detail-pane">
-        <div class="panel-head"><h2>Detail</h2><span class="muted mono" id="detail-host"></span></div>
-        <div id="detail-empty" class="muted pad">Select an alert or client to inspect.</div>
-        <div id="detail" hidden>
-          <div class="verdict" id="verdict"></div>
-          <div class="score-bars" id="score-bars"></div>
-          <div id="host-meta" class="host-meta" hidden></div>
-          <h3 id="ev-head" hidden>Evidence</h3>
-          <div id="evidence" class="evidence"></div>
-          <h3>TB-Graph <span class="muted">IPs / domains labelled · hover a burst for ports</span></h3>
-          <svg id="graph" viewBox="0 0 540 400" preserveAspectRatio="xMidYMid meet"></svg>
-          <p class="muted edge-key">
-            <b style="color:#ff9500">—</b> periodic
-            <b style="color:#ff3b3b">—</b> direction change
-            <b style="color:#5b6b93">—</b> other
-          </p>
+          <div class="absolute top-container-padding right-container-padding z-20 flex gap-2">
+            <button id="gx-zoom-in" class="gx-ctl"><span class="material-symbols-outlined">zoom_in</span></button>
+            <button id="gx-zoom-out" class="gx-ctl"><span class="material-symbols-outlined">zoom_out</span></button>
+            <button id="gx-center" class="gx-ctl"><span class="material-symbols-outlined">filter_center_focus</span></button>
+            <button id="gx-reset" class="gx-ctl"><span class="material-symbols-outlined">refresh</span></button>
+          </div>
+
+          <div class="absolute bottom-container-padding left-container-padding z-20 w-64 bg-surface/90 backdrop-blur-xl rounded border border-outline-variant/30 shadow-2xl p-4 flex flex-col gap-4">
+            <div class="flex items-center justify-between pb-2 border-b border-outline-variant/20">
+              <h3 class="font-label-caps text-[11px] text-on-surface-variant">MAPPING_LEGEND</h3>
+              <span class="material-symbols-outlined text-[16px] text-on-surface-variant">visibility</span>
+            </div>
+            <div class="flex flex-col gap-2">
+              <span class="font-label-caps text-[10px] text-on-surface-variant/70">NODE_TYPES</span>
+              <div class="flex items-center gap-3"><div class="w-3 h-3 rounded-full bg-primary-fixed-dim shadow-[0_0_8px_rgba(0,219,231,0.5)]"></div><span class="font-data-md text-[13px] text-on-surface">Host</span></div>
+              <div class="flex items-center gap-3"><div class="w-3 h-3 rounded-full" style="background:#c3a3ff;box-shadow:0 0 8px rgba(185,131,255,.5)"></div><span class="font-data-md text-[13px] text-on-surface">Peer</span></div>
+              <div class="flex items-center gap-3"><div class="w-3 h-3 rounded-full bg-tertiary-fixed-dim shadow-[0_0_8px_rgba(232,196,35,0.5)]"></div><span class="font-data-md text-[13px] text-on-surface">Domain</span></div>
+              <div class="flex items-center gap-3"><div class="w-3 h-3 rounded-full border-2 border-error animate-pulse"></div><span class="font-data-md text-[13px] text-error">Burst</span></div>
+            </div>
+            <div class="h-px w-full bg-outline-variant/20"></div>
+            <div class="flex flex-col gap-2">
+              <span class="font-label-caps text-[10px] text-on-surface-variant/70">EDGE_TYPES</span>
+              <div class="flex items-center gap-3"><div class="w-6 h-0.5 bg-primary-fixed-dim/60"></div><span class="font-data-md text-[13px] text-on-surface">Sequence</span></div>
+              <div class="flex items-center gap-3"><div class="w-6 border-b-2 border-dashed border-primary-fixed-dim"></div><span class="font-data-md text-[13px] text-on-surface">Periodic</span></div>
+              <div class="flex items-center gap-3"><div class="w-6 border-b-2 border-dashed border-error"></div><span class="font-data-md text-[13px] text-on-surface">Dir Change</span></div>
+              <div class="flex items-center gap-3"><div class="w-6 h-0.5" style="background:#e8c423;opacity:.6"></div><span class="font-data-md text-[13px] text-on-surface">Resolves</span></div>
+            </div>
+          </div>
+
+          <svg id="gx-svg" class="absolute inset-0 w-full h-full cursor-grab active:cursor-grabbing" viewBox="0 0 1280 720" preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <filter id="gx-glow" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+              <filter id="gx-glow-burst" x="-70%" y="-70%" width="240%" height="240%"><feGaussianBlur stdDeviation="7" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+              <linearGradient id="gx-flow" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#3a494b"/><stop offset="50%" stop-color="#00f2ff"/><stop offset="100%" stop-color="#3a494b"/></linearGradient>
+            </defs>
+          </svg>
         </div>
-      </section>
-    </main>
-  </div>
+
+        <aside id="gx-meta" class="w-80 bg-surface/80 backdrop-blur-2xl border-l border-outline-variant/20 flex flex-col z-20 shadow-[-10px_0_20px_rgba(0,0,0,0.3)] transition-transform duration-300 translate-x-full">
+          <div class="h-14 flex items-center justify-between px-4 border-b border-outline-variant/30 bg-surface-container-low">
+            <div class="flex items-center gap-2"><span class="material-symbols-outlined text-primary-fixed-dim text-[18px]">info</span>
+              <span class="font-label-caps text-[11px] text-on-surface">NODE_METADATA</span></div>
+            <button id="gx-meta-close" class="text-on-surface-variant hover:text-on-surface transition-colors"><span class="material-symbols-outlined text-[20px]">close</span></button>
+          </div>
+          <div class="flex-1 overflow-y-auto p-4 flex flex-col gap-6 custom-scrollbar">
+            <div id="gx-meta-empty" class="flex flex-col items-center justify-center h-full text-center opacity-50">
+              <span class="material-symbols-outlined text-4xl mb-4 text-on-surface-variant">ads_click</span>
+              <p class="font-data-md text-[14px] text-on-surface-variant">Select a node to inspect metadata.</p>
+            </div>
+            <div id="gx-meta-body" class="hidden flex-col gap-6">
+              <div class="flex flex-col gap-1">
+                <span class="font-label-caps text-[10px] text-on-surface-variant">IDENTIFIER</span>
+                <h2 id="gx-meta-title" class="font-headline-md text-[24px] text-primary-fixed-dim break-all">--</h2>
+              </div>
+              <div class="grid grid-cols-2 gap-4">
+                <div class="flex flex-col gap-1 bg-surface-container-low p-3 rounded border border-outline-variant/10">
+                  <span class="font-label-caps text-[10px] text-on-surface-variant">ADDRESS</span>
+                  <span id="gx-meta-ip" class="font-data-md text-[14px] text-on-surface break-all">--</span></div>
+                <div class="flex flex-col gap-1 bg-surface-container-low p-3 rounded border border-outline-variant/10">
+                  <span class="font-label-caps text-[10px] text-on-surface-variant">METRIC</span>
+                  <span id="gx-meta-score" class="font-data-md text-[14px] text-primary-fixed-dim">--</span></div>
+              </div>
+              <div class="flex flex-col gap-2">
+                <span class="font-label-caps text-[10px] text-on-surface-variant flex items-center gap-2">DETAIL<span class="h-px flex-1 bg-outline-variant/30"></span></span>
+                <div id="gx-meta-history" class="bg-surface-container-lowest p-3 rounded border border-outline-variant/20 font-data-md text-[13px] text-on-surface-variant leading-relaxed max-h-40 overflow-y-auto custom-scrollbar">--</div>
+              </div>
+              <div class="mt-2 flex flex-col gap-2">
+                <button id="gx-expand" class="w-full h-10 bg-primary-fixed-dim text-on-primary-fixed font-label-caps text-[11px] rounded flex items-center justify-center gap-2 hover:bg-primary-fixed transition-colors"><span class="material-symbols-outlined text-[16px]">account_tree</span> EXPAND GRAPH</button>
+                <button id="gx-trace" class="w-full h-10 bg-transparent border border-primary-fixed-dim/30 text-primary-fixed-dim font-label-caps text-[11px] rounded flex items-center justify-center gap-2 hover:bg-primary-fixed-dim/10 transition-colors"><span class="material-symbols-outlined text-[16px]">terminal</span> INITIATE TRACE</button>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <!-- ================= SCREEN 3 · AI INTELLIGENCE ================= -->
+    <section id="screen-ai" class="screen hidden relative z-10 h-[calc(100vh-64px)]">
+      <div class="flex w-full h-full overflow-hidden">
+
+        <aside class="w-[380px] h-full flex flex-col bg-surface-container-low overflow-y-auto shrink-0 custom-scrollbar">
+          <div class="p-container-padding flex flex-col gap-8">
+            <div class="flex flex-col gap-4">
+              <div class="flex items-center gap-2"><span class="material-symbols-outlined text-primary-fixed-dim text-[16px]">target</span>
+                <h2 class="font-label-caps text-[12px] text-on-surface">INVESTIGATION CONTEXT</h2></div>
+              <div class="flex flex-col gap-3">
+                <div class="bg-surface-container p-4 rounded-2xl flex flex-col gap-2 relative overflow-hidden">
+                  <div class="absolute top-0 right-0 w-16 h-16 bg-error/10 blur-xl rounded-full"></div>
+                  <span class="font-label-caps text-[10px] text-error">ACTIVE ALERT</span>
+                  <span id="ctx-alert-name" class="font-data-lg text-[18px] text-on-surface truncate">—</span>
+                  <div class="flex items-center justify-between mt-1">
+                    <span id="ctx-alert-sub" class="font-data-md text-[12px] text-on-surface-variant">—</span>
+                    <span id="ctx-alert-sev" class="px-2 py-0.5 bg-error/10 text-error font-label-caps text-[10px] rounded border border-error/20">—</span>
+                  </div>
+                </div>
+                <div class="bg-surface-container p-4 rounded-2xl flex flex-col gap-2 relative overflow-hidden">
+                  <div class="absolute top-0 right-0 w-16 h-16 bg-tertiary-fixed-dim/10 blur-xl rounded-full"></div>
+                  <span class="font-label-caps text-[10px] text-tertiary-fixed-dim">TARGET HOST</span>
+                  <span id="ctx-host" class="font-data-lg text-[18px] text-on-surface truncate">—</span>
+                  <div class="flex items-center justify-between mt-1">
+                    <span id="ctx-host-sub" class="font-data-md text-[12px] text-on-surface-variant">—</span>
+                    <span class="material-symbols-outlined text-on-surface-variant text-[14px]">dns</span>
+                  </div>
+                </div>
+                <div class="bg-surface-container p-4 rounded-2xl flex flex-col gap-2 relative overflow-hidden">
+                  <div class="absolute top-0 right-0 w-16 h-16 bg-primary-fixed-dim/10 blur-xl rounded-full"></div>
+                  <span class="font-label-caps text-[10px] text-primary-fixed-dim">GRAPH METRICS</span>
+                  <div class="flex gap-4 mt-1">
+                    <div class="flex flex-col"><span id="ctx-edges" class="font-data-lg text-[18px] text-on-surface">—</span><span class="font-label-caps text-[9px] text-on-surface-variant">EDGES</span></div>
+                    <div class="w-px bg-outline-variant/30"></div>
+                    <div class="flex flex-col"><span id="ctx-peers" class="font-data-lg text-[18px] text-on-surface">—</span><span class="font-label-caps text-[9px] text-on-surface-variant">PEERS</span></div>
+                    <div class="w-px bg-outline-variant/30"></div>
+                    <div class="flex flex-col"><span id="ctx-impact" class="font-data-lg text-[18px] text-on-surface">—</span><span class="font-label-caps text-[9px] text-on-surface-variant">IMPACT</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="h-px w-full bg-outline-variant/20"></div>
+            <div class="flex flex-col gap-4">
+              <div class="flex items-center gap-2"><span class="material-symbols-outlined text-primary-fixed-dim text-[16px]">alt_route</span>
+                <h2 class="font-label-caps text-[12px] text-on-surface">SUGGESTED PATHS</h2></div>
+              <div id="suggested-paths" class="flex flex-col gap-2"></div>
+            </div>
+          </div>
+        </aside>
+
+        <div class="flex-1 flex flex-col h-full bg-surface relative border-l border-r border-outline-variant/10">
+          <div class="h-14 border-b border-outline-variant/20 flex items-center justify-between px-6 bg-surface-container-lowest/50 backdrop-blur-md shrink-0">
+            <div class="flex items-center gap-3">
+              <div class="w-2 h-2 rounded-full bg-primary-fixed-dim animate-pulse shadow-[0_0_8px_#00dbe7]"></div>
+              <span class="font-label-caps text-[11px] text-on-surface">UNINET_NEXUS_AI</span>
+              <span class="px-2 py-0.5 bg-primary-container/10 text-primary-fixed-dim font-label-caps text-[9px] rounded-full">PHASE-4 · READ-ONLY</span>
+            </div>
+            <button id="chat-export" class="text-on-surface-variant hover:text-on-surface transition-colors flex items-center gap-1">
+              <span class="material-symbols-outlined text-[16px]">download</span><span class="font-label-caps text-[10px]">EXPORT_LOG</span>
+            </button>
+          </div>
+          <div id="chat-container" class="flex-1 overflow-y-auto p-8 flex flex-col gap-8 scroll-smooth pb-32 custom-scrollbar"></div>
+          <div class="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-surface via-surface to-transparent pt-12">
+            <div class="relative max-w-4xl mx-auto flex flex-col group">
+              <div class="relative flex items-end bg-surface-container-lowest border border-outline-variant/40 rounded-xl overflow-hidden shadow-2xl focus-within:border-primary-fixed-dim/50 transition-colors">
+                <div class="p-4 shrink-0 grid place-items-center"><span class="material-symbols-outlined text-on-surface-variant">terminal</span></div>
+                <textarea id="chat-input" rows="1" placeholder="Query threat data, analyze payloads, or ask for recommendations..."
+                  class="w-full bg-transparent py-4 px-2 font-data-md text-on-surface placeholder:text-on-surface-variant/50 outline-none resize-none max-h-32 min-h-[56px]"></textarea>
+                <div class="p-3 shrink-0">
+                  <button id="chat-send" class="w-10 h-10 rounded-lg bg-primary-fixed-dim text-on-primary-fixed hover:bg-primary-container transition-colors grid place-items-center shadow-[0_0_15px_rgba(0,219,231,0.3)]">
+                    <span class="material-symbols-outlined">send</span></button>
+                </div>
+              </div>
+              <div class="flex justify-between items-center px-2 mt-2">
+                <span class="font-label-caps text-on-surface-variant/50 text-[9px]">PRESS ENTER TO SEND, SHIFT+ENTER FOR NEW LINE</span>
+                <span class="font-data-md text-primary-fixed-dim/70 text-[10px]">MODEL: PASSIVE-CONTEXT</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <aside class="w-80 h-full flex flex-col bg-surface-container-lowest shrink-0">
+          <div class="h-14 border-b border-outline-variant/20 flex items-center gap-2 px-4 shrink-0">
+            <span class="material-symbols-outlined text-tertiary-fixed-dim text-[16px]">folder_open</span>
+            <h2 class="font-label-caps text-[11px] text-on-surface">EVIDENCE REPOSITORY</h2>
+          </div>
+          <div id="evidence-repo" class="flex-1 overflow-y-auto p-4 flex flex-col gap-4 custom-scrollbar">
+            <div class="font-data-md text-[12px] text-outline">No alert selected.</div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+  </main>
 </div>
 
 <script src="{{ url_for('static', filename='app.js') }}"></script>

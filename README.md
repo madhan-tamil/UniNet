@@ -9,14 +9,14 @@ alerts. No return path, no probing, no payload decryption.
 
 ---
 
-## Status — Phases 1, 2, 5 implemented
+## Status — all 5 phases implemented
 
 | Phase | Scope | State |
 |-------|-------|-------|
 | 1 | ingestion → features → TB-Graph → detector → API → interactive dashboard (session login) | ✅ |
-| 2 | RGAT + anomaly model → fused threat score | ✅ (RGAT via `[ml]` extra; heuristic graph scorer otherwise) |
-| 3 | explainability (feature importance, subgraph, timeline) | scaffold only |
-| 4 | analyst assistant (reads alerts/evidence/graph only) | scaffold only (`POST /api/ask` → 501) |
+| 2 | anomaly + RGAT graph + temporal-sequence models → fused threat score | ✅ (real models via `[ml]`; dependency-free fallbacks otherwise) |
+| 3 | explainability — narrative, key factors, burst timeline, fusion bars, graph anchors | ✅ (`GET /api/explain/<id>`) |
+| 4 | read-only analyst assistant — offline templated Q&A over alert/evidence/graph | ✅ (`POST /api/ask {question, alert_id?}`) |
 | 5 | scale-out: host-partitioned parallel workers + live console | ✅ (`--workers N`, `--live`) |
 
 On the built-in synthetic scenarios (8 seeds): **precision 1.0, recall 1.0, FP-rate 0.0**;
@@ -58,7 +58,7 @@ hover a burst for its ports.
 python -m uninet.demo                     # CLI: alerts table + ground-truth check (no server)
 python -m uninet.eval.metrics             # detection metrics
 python -m uninet.eval.throughput_bench --flows 400000 --workers 4
-python -m pytest                          # 28 tests
+python -m pytest                          # 41 tests
 ```
 
 Optional extras: `.[dev]` (pytest/ruff), `.[pcap]` (scapy), `.[stream]` (Kafka one-way bus),
@@ -74,8 +74,8 @@ src/uninet/
   features/     flow/DNS/TLS/JA3/temporal extractor + behavioural fingerprint
   baseline/     adaptive per-host profile (false-positive suppression)
   tb_graph/     burst_builder → graph_builder → graph_store        ⭐ core
-  detection/    rules · anomaly_model · rgat_model · detector (evidence fusion)
-  explainability/ , assistant/   (Phase 3 / 4 — read-only)
+  detection/    rules · anomaly_model · rgat_model · sequence_model · detector (evidence fusion)
+  explainability/  narrative + factors + timeline   ·   assistant/  offline read-only Q&A
   api/          Flask endpoints + static dashboard
 tests/  eval/  docs/  scripts/  notebooks/  config/
 ```

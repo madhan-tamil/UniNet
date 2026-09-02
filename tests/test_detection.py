@@ -48,5 +48,5 @@ def test_benign_hosts_quiet(result):
 def test_every_alert_has_evidence_and_scores(result):
     for a in result.alerts:
         assert a.evidence, a
-        assert set(a.scores) == {"rule", "anomaly", "graph"}
+        assert set(a.scores) == {"rule", "anomaly", "graph", "sequence"}
         assert 0.0 <= a.confidence <= 1.0

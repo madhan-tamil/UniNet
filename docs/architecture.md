@@ -18,16 +18,21 @@
                              edges: emits, burst_in/out, direction_change, periodic, resolves
           │
           ▼
-   detection/                rules (statistical)  ┐
-                             anomaly_model (IsoForest / baseline)  ├─ evidence fusion ─► Alert
-                             rgat_model (RGAT │ heuristic graph)   ┘
+   detection/                rules (statistical)                       ┐
+                             anomaly_model (IsoForest / baseline)      ├─ evidence
+                             rgat_model (RGAT │ heuristic graph)       │   fusion ─► Alert
+                             sequence_model (GRU │ heuristic temporal) ┘
           │
           ▼
-   api/app.py                Flask: /api/alerts /api/graph /api/explain  + dashboard
-          │
+   api/app.py                Flask: /api/alerts /api/graph /api/explain /api/ask
+          │                        + /api/stream (SSE) + dashboard
           ▼
-   explainability/ , assistant/   (Phase 3 / 4 — read-only)
+   explainability/  narrative · key factors · burst timeline · fusion bars
+   assistant/       offline read-only Q&A over the alert + explanation + subgraph
 ```
+
+Sequence model is **additive evidence only** — it never changes the fused
+confidence or the chosen threat class.
 
 ## Windowing
 
@@ -80,4 +85,5 @@ return path, no probing, no payload decryption, no mitigation commands. The
 
 Enforced: `src/uninet/assistant/` must not import `socket`, `subprocess`,
 `requests`, `scapy`, … (`tests/test_assistant_readonly.py`). The HTTP API exposes
-no mutating routes; `POST /api/ask` returns `501` until Phase 4.
+no mutating routes; `POST /api/ask` is the offline templated assistant (no LLM,
+no network) so the read-only guarantee holds by construction.

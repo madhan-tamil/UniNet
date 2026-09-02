@@ -6,30 +6,32 @@
 <title>UniNet · Sign in</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet" />
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
 </head>
 <body class="login-body">
   <form class="login-card" method="post" action="{{ url_for('auth.do_login') }}">
     <div class="login-brand">
-      <span class="logo-dot"></span>
+      <span class="mark"><span class="material-symbols-outlined">radar</span></span>
       <div>
         <h1>UniNet</h1>
-        <p>Unidirectional Threat Console</p>
+        <p>Threat Workspace</p>
       </div>
     </div>
 
     {% if error %}<div class="login-error">{{ error }}</div>{% endif %}
 
-    <label>Username
+    <label>Operator
       <input name="username" autocomplete="username" autofocus required />
     </label>
-    <label>Password
+    <label>Passphrase
       <input name="password" type="password" autocomplete="current-password" required />
     </label>
     <input type="hidden" name="next" value="{{ next }}" />
-    <button type="submit">Sign in</button>
+    <button type="submit">Authenticate</button>
 
-    <p class="login-hint">Read-only monitoring. Default: <code>admin</code> / <code>uninet</code></p>
+    <p class="login-hint">Passive read-only sensor · default <code>admin</code> / <code>uninet</code></p>
   </form>
 </body>
 </html>

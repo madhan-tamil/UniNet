@@ -1,20 +1,27 @@
 "use strict";
+/* UniNet — "Obsidian Protocol" · 3 screens (Workspace · Graph Explorer · AI Intelligence)
+   Wired to the passive read-only API:
+     /api/stats  /api/alerts  /api/hosts  /api/explain/<id>  /api/graph  /api/stream  /api/ask
+*/
 const $ = (s) => document.querySelector(s);
+const $$ = (s) => document.querySelectorAll(s);
 const SVGNS = "http://www.w3.org/2000/svg";
-const SEV = ["critical", "high", "medium", "low"];
-const SEV_COLOR = { critical: "#ff3b3b", high: "#ff9500", medium: "#ffcc00", low: "#34c759" };
-const NODE_COLOR = { host: "#4f8dff", burst: "#ffcc00", domain: "#ffb77a", alert: "#ff3b3b" };
-const VIEW_TITLE = { overview: "Overview", alerts: "Alerts", hosts: "Clients" };
+
+const SEV_COLOR = { critical: "#ffb4ab", high: "#ffe173", medium: "#00dbe7", low: "#849495" };
+const NODE_COLOR = { host: "#00f2ff", burst: "#ffe173", domain: "#c3a3ff", alert: "#ffb4ab" };
 
 const state = {
-  view: "overview",          // "overview" | "alerts" | "hosts"
-  filter: {},                // { severity?, threat?, host? }
-  alerts: [],
-  hosts: [],
-  activeAlert: null,
-  prevAlertIds: new Set(),   // for the "fresh alert" flash
-  lastUpdate: 0,             // ms epoch of the last successful tick
-  version: -1,               // detection version from /api/stats
+  screen: "workspace",
+  queueMode: "alerts",        // "alerts" | "hosts"
+  filter: {},
+  alerts: [], hosts: [],
+  activeAlert: null, activeHost: null,
+  activeAlertObj: null,
+  graphView: null,            // last /api/graph payload for the active target
+  prevAlertIds: new Set(),
+  lastUpdate: 0, version: -1,
+  playing: false,
+  chat: [], chatSeeded: false,
 };
 
 async function j(url, opts) {
@@ -22,373 +29,659 @@ async function j(url, opts) {
   if (r.status === 401) { window.location = "/login"; throw new Error("unauth"); }
   return r.json();
 }
+const fmtTime = (e) => new Date(e * 1000).toLocaleTimeString([], { hour12: false });
+const fmtBytes = (b) => { b = +b || 0; return b > 1e6 ? (b / 1e6).toFixed(1) + " MB" : b > 1e3 ? (b / 1e3).toFixed(1) + " KB" : b + " B"; };
+const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-/* ---------------- header / config ---------------- */
+/* ================= screen switching ================= */
+function setScreen(name) {
+  state.screen = name;
+  $$("#rail .nav-icon[data-screen]").forEach((b) => b.classList.toggle("is-active", b.dataset.screen === name));
+  $$(".screen").forEach((s) => s.classList.toggle("hidden", s.id !== "screen-" + name));
+  if (name === "graph") enterGraphScreen();
+  if (name === "ai") enterAIScreen();
+}
+
+/* ================= config / loop ================= */
 async function loadConfig() {
   try {
     const c = await j("/api/config");
-    const link = $("#port-link");
-    link.textContent = `:${c.port}`;
-    link.href = c.base_url + "/";
-    link.title = `dashboard @ ${c.base_url}  ·  bind ${c.bind_host}  ·  bus ${c.bus}  ·  window ${c.window_seconds}s`;
-    const dot = $("#live-dot");
-    if (dot) dot.title = c.live
-      ? `live mode — detections refresh every few seconds`
-      : `real-time stream connected (static detection set)`;
+    const d = $("#live-dot");
+    if (d) d.title = c.live ? "live mode — detections refresh every few seconds" : "real-time stream connected";
   } catch (_) {}
 }
-
-/* ---------------- stats (clickable filters) ---------------- */
-async function loadStats() {
-  const s = await j("/api/stats");
-  $("#s-flows").textContent = s.flows.toLocaleString();
-  $("#s-windows").textContent = s.windows;
-  $("#s-hosts").textContent = s.hosts;
-  $("#s-graph").textContent = `${s.graph.nodes} / ${s.graph.edges}`;
-  $("#s-alerts").textContent = s.alerts;
-
-  const mini = $("#s-sevmini");
-  mini.innerHTML = "";
-  SEV.forEach((k) => {
-    const n = s.by_severity[k] || 0;
-    if (!n) return;
-    const bar = document.createElement("span");
-    bar.style.background = SEV_COLOR[k];
-    bar.style.flex = String(n);
-    bar.title = `filter: ${n} ${k}`;
-    bar.onclick = (e) => { e.stopPropagation(); toggleFilter("severity", k); };
-    mini.appendChild(bar);
-  });
-
-  const chips = $("#s-threats");
-  chips.innerHTML = "";
-  Object.entries(s.by_threat || {}).sort((a, b) => b[1] - a[1]).forEach(([k, v]) => {
-    const c = document.createElement("span");
-    c.className = "chip" + (state.filter.threat === k ? " on" : "");
-    c.textContent = `${k} · ${v}`;
-    c.onclick = () => toggleFilter("threat", k);
-    chips.appendChild(c);
-  });
-
-  if (typeof s.version === "number") state.version = s.version;
-  return s;
+let _ticking = false;
+async function tick() {
+  if (_ticking) return;
+  _ticking = true;
+  try {
+    const [stats, alerts, hosts] = await Promise.all([j("/api/stats"), j("/api/alerts"), j("/api/hosts")]);
+    if (typeof stats.version === "number") state.version = stats.version;
+    state.alerts = alerts; state.hosts = hosts;
+    state.lastUpdate = Date.now();
+    paintStats(stats);
+    render();
+    paintRefreshed();
+  } catch (_) {} finally { _ticking = false; }
 }
-
-/* ---------------- "updated Ns ago" ticker ---------------- */
+let _tt = null;
+function scheduleTick() { clearTimeout(_tt); _tt = setTimeout(tick, 250); }
+function paintStats(s) {
+  const g = s.graph || {};
+  const gs = $("#graph-sub");
+  if (gs) gs.textContent = `VIEW: LOGICAL TOPOLOGY | ACTIVE NODES: ${g.nodes ?? 0} | FLOWS: ${(s.flows ?? 0).toLocaleString()}`;
+  const ha = $("#hdr-alerts"); if (ha) ha.textContent = s.alerts ?? "—";
+}
 function paintRefreshed() {
   const el = $("#refreshed");
   if (!el || !state.lastUpdate) return;
-  const secs = Math.round((Date.now() - state.lastUpdate) / 1000);
-  el.textContent = secs < 2 ? "updated just now"
-    : secs < 60 ? `updated ${secs}s ago`
-    : `updated ${Math.round(secs / 60)}m ago`;
+  const s = Math.round((Date.now() - state.lastUpdate) / 1000);
+  el.textContent = s < 2 ? "LIVE" : s < 60 ? `${s}s AGO` : `${Math.round(s / 60)}m AGO`;
 }
 
-function toggleFilter(key, val) {
-  state.filter[key] = state.filter[key] === val ? undefined : val;
-  if (key === "severity" || key === "threat") setView("alerts");
+/* ================= filters ================= */
+function clearFilter() {
+  state.filter = {};
+  const s = $("#search"); if (s) s.value = "";
+  $("#search-clear").classList.add("hidden");
   render();
 }
-function clearFilter() { state.filter = {}; render(); }
+const matchQ = (txt) => { const q = state.filter.q; return !q || String(txt).toLowerCase().includes(q); };
 
-/* ---------------- view switching ---------------- */
-function setView(v) {
-  state.view = v;
-  const listMode = v === "hosts" ? "hosts" : "alerts";   // overview shares the alerts list
-  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t.dataset.view === v));
-  $("#alert-list").hidden = listMode !== "alerts";
-  $("#host-list").hidden = listMode !== "hosts";
-  const vt = $("#view-title"); if (vt) vt.textContent = VIEW_TITLE[v] || "Overview";
-  const lt = $("#list-title"); if (lt) lt.textContent = listMode === "hosts" ? "Clients" : "Alerts";
-  render();
-}
-
-/* ---------------- render ---------------- */
+/* ================= workspace render ================= */
 function render() {
-  const f = state.filter;
-  const active = Object.entries(f).filter(([, v]) => v);
-  $("#filterbar").hidden = active.length === 0;
-  $("#filter-label").textContent = "filter — " + active.map(([k, v]) => `${k}: ${v}`).join(" · ");
+  const active = Object.entries(state.filter).filter(([, v]) => v);
+  const fb = $("#filterbar");
+  fb.classList.toggle("hidden", active.length === 0);
+  fb.classList.toggle("flex", active.length > 0);
+  $("#filter-label").textContent = active.map(([k, v]) => `${k}=${v}`).join("  ·  ");
 
-  if (state.view === "hosts") renderHosts();
-  else renderAlerts();
+  const hosts = state.queueMode === "hosts";
+  $("#alert-list").classList.toggle("hidden", hosts);
+  $("#host-list").classList.toggle("hidden", !hosts);
+  $("#queue-title").textContent = hosts ? "HOST REGISTRY" : "ALERT QUEUE";
+  if (hosts) renderHosts(); else renderAlerts();
+  renderTimeline();
 }
 
 function renderAlerts() {
   const f = state.filter;
   const rows = state.alerts.filter((a) =>
     (!f.severity || a.severity === f.severity) &&
-    (!f.threat || a.threat_type === f.threat) &&
-    (!f.host || a.src_host === f.host));
-  $("#list-count").textContent = `${rows.length} / ${state.alerts.length} alerts`;
-
-  const seen = state.prevAlertIds;
-  const canFlash = seen.size > 0;
-
+    (!f.host || a.src_host === f.host) &&
+    matchQ(`${a.threat_type} ${a.src_host} ${a.severity}`));
+  $("#list-count").textContent = `${rows.length}/${state.alerts.length}`;
+  const seen = state.prevAlertIds, canFlash = seen.size > 0;
+  let fresh = 0;
   const list = $("#alert-list");
-  list.innerHTML = rows.length ? "" : `<div class="muted pad">No alerts match the filter.</div>`;
+  list.innerHTML = rows.length ? "" : `<div class="p-3 font-data-md text-[12px] text-outline">NO ALERTS MATCH FILTER</div>`;
   rows.forEach((a) => {
-    const sc = a.scores || {};
+    const isFresh = canFlash && !seen.has(a.alert_id);
+    if (isFresh) fresh++;
+    const chip = a.severity === "critical" ? "crit" : a.severity === "high" ? "high" : "";
     const card = document.createElement("div");
-    const fresh = canFlash && !seen.has(a.alert_id);
-    card.className = "alert-card"
-      + (a.alert_id === state.activeAlert ? " active" : "")
-      + (fresh ? " fresh" : "");
+    card.className = `q-card sev-${a.severity}` + (a.alert_id === state.activeAlert ? " active" : "") + (isFresh ? " fresh" : "");
     card.innerHTML = `
-      <div class="stripe ${a.severity}"></div>
-      <div class="alert-main">
-        <div class="row1">
-          <span class="badge sev-${a.severity}">${a.severity}</span>
-          <span class="badge">${a.threat_type}</span>
-          <span class="host">${a.src_host}</span>
-        </div>
-        <div class="ev">${a.evidence && a.evidence[0] ? a.evidence[0].detail : ""}</div>
+      <div class="flex justify-between items-start">
+        <span class="q-title sev-${a.severity}">${esc((a.threat_type || "").toUpperCase().replace(/_/g, " "))}</span>
+        <span class="q-time">${fmtTime(a.window_end || a.window_start || a.created_ts || Date.now() / 1000)}</span>
       </div>
-      <div class="alert-right">
-        <span class="conf" style="color:${SEV_COLOR[a.severity]}">${a.confidence.toFixed(2)}</span>
-        <span class="subscores">R ${(sc.rule ?? 0).toFixed(2)} · A ${(sc.anomaly ?? 0).toFixed(2)} · G ${(sc.graph ?? 0).toFixed(2)}</span>
+      <div class="q-meta">HOST: ${esc(a.src_host)}</div>
+      <div class="mt-2 flex gap-2 flex-wrap">
+        <span class="q-chip ${chip}">${a.severity.toUpperCase()}</span>
+        ${a.evidence && a.evidence[0] ? `<span class="q-chip">${esc(String(a.evidence[0].name).toUpperCase().slice(0, 14))}</span>` : ""}
+        <span class="q-chip">CONF ${(a.confidence ?? 0).toFixed(2)}</span>
       </div>`;
     card.onclick = () => selectAlert(a);
     list.appendChild(card);
   });
-
   state.prevAlertIds = new Set(state.alerts.map((a) => a.alert_id));
-
-  if (!state.activeAlert && rows[0]) selectAlert(rows[0]);
+  if (fresh) flashNewThreat();
+  if (!state.activeAlert && !state.activeHost && rows[0]) selectAlert(rows[0]);
 }
 
 function renderHosts() {
-  const f = state.filter;
-  const rows = state.hosts.filter((h) => !f.host || h.ip === f.host);
-  $("#list-count").textContent = `${rows.length} clients`;
-
+  const rows = state.hosts.filter((h) => matchQ(`${h.ip} ${(h.alert && h.alert.threat) || ""}`));
+  $("#list-count").textContent = `${rows.length}`;
   const list = $("#host-list");
-  list.innerHTML = "";
+  list.innerHTML = rows.length ? "" : `<div class="p-3 font-data-md text-[12px] text-outline">NO HOSTS</div>`;
   rows.forEach((h) => {
-    const al = h.alert;
-    const sev = al ? al.severity : "none";
+    const al = h.alert, sev = al ? al.severity : "low";
     const card = document.createElement("div");
-    card.className = "alert-card" + (state.filter.host === h.ip ? " active" : "");
-    const ports = h.dst_ports.slice(0, 8).join(", ") || "—";
+    card.className = `q-card sev-${sev}` + (state.activeHost === h.ip ? " active" : "");
     card.innerHTML = `
-      <div class="stripe ${sev}"></div>
-      <div class="alert-main">
-        <div class="row1">
-          <span class="host">${h.ip}</span>
-          ${al ? `<span class="badge sev-${al.severity}">${al.threat}</span>`
-               : `<span class="badge ok">clean</span>`}
-        </div>
-        <div class="meta">${h.flows} flows · ${h.bursts} bursts · ${h.peer_count} peers · ports ${ports}</div>
-        <div class="fp">fp ${h.fingerprint} · periodicity ${h.periodicity}</div>
-      </div>
-      <div class="alert-right">
-        <span class="conf" style="color:${al ? SEV_COLOR[al.severity] : "var(--muted)"}">${al ? al.confidence.toFixed(2) : ""}</span>
-        <span class="subscores">${(h.bytes / 1e6).toFixed(1)} MB</span>
+      <div class="flex justify-between items-start"><span class="q-title">${esc(h.ip)}</span><span class="q-time">${h.flows} fl</span></div>
+      <div class="q-meta">${h.bursts} bursts · ${h.peer_count} peers · ${(h.bytes / 1e6).toFixed(1)} MB</div>
+      <div class="mt-2 flex gap-2 flex-wrap">
+        ${al ? `<span class="q-chip ${al.severity === "critical" ? "crit" : al.severity === "high" ? "high" : ""}">${esc(al.threat.toUpperCase())}</span>` : `<span class="q-chip">CLEAN</span>`}
+        <span class="q-chip">${esc(h.fingerprint || "—")}</span>
       </div>`;
     card.onclick = () => selectHost(h);
     list.appendChild(card);
   });
 }
 
-/* ---------------- selection ---------------- */
+/* ================= selection ================= */
+function wsShowDetail() {
+  $("#ws-detail-empty").classList.add("hidden");
+  const d = $("#ws-detail"); d.classList.remove("hidden"); d.classList.add("flex");
+}
+function renderWsDetail(a, evi) {
+  wsShowDetail();
+  $("#ws-target").textContent = `${a.src_host} · ${fmtTime(a.window_start || a.created_ts || Date.now() / 1000)}`;
+  $("#ws-verdict").innerHTML =
+    `<span style="color:${SEV_COLOR[a.severity] || "#dce4e4"}">${esc((a.threat_type || "").toUpperCase().replace(/_/g, " "))}</span>` +
+    ` · CONF ${(a.confidence ?? 0).toFixed(2)} · ${(a.severity || "").toUpperCase()}`;
+  $("#ws-summary").textContent = a.summary || "";
+  $("#ws-evidence").innerHTML = (evi && evi.length)
+    ? evi.map((e) => `<div class="ai-msg ${e.kind === "anomaly" ? "" : ""}"><div class="who">${esc(e.kind)} · ${esc(e.name)} · ${(e.score ?? 0).toFixed(2)}</div>${esc(e.detail)}</div>`).join("")
+    : `<div class="font-data-md text-[12px] text-outline">no evidence</div>`;
+}
+
 async function selectAlert(a) {
   state.activeAlert = a.alert_id;
-  if (state.view !== "hosts") renderAlerts();
+  state.activeAlertObj = a;
+  state.activeHost = null;
+  $("#investigation-id").textContent = "#" + String(a.alert_id).slice(0, 8).toUpperCase();
+  $("#ai-alert").textContent = "#" + String(a.alert_id).slice(0, 8).toUpperCase();
+  $("#ai-host").textContent = a.src_host;
+  renderWsDetail(a, a.evidence || []);
+  render();
 
-  $("#detail-empty").hidden = true;
-  $("#detail").hidden = false;
-  $("#host-meta").hidden = true;
-  $("#ev-head").hidden = false;
-  $("#detail-host").textContent = a.src_host;
+  let ex;
+  try { ex = await j(`/api/explain/${a.alert_id}`); } catch (_) { return; }
+  renderScores(ex.fused_from || a.scores || {});
+  $("#verdict").innerHTML =
+    `<span class="text-primary-fixed-dim">${esc(ex.threat_type)}</span> · CONF ${(ex.confidence ?? 0).toFixed(2)}`;
+  state.lastEvidence = ex.evidence || [];
+  renderWsDetail(a, ex.evidence || []);
 
-  const ex = await j(`/api/explain/${a.alert_id}`);
-  $("#verdict").innerHTML = `<b>${ex.threat_type}</b> · confidence ${ex.confidence.toFixed(2)}`;
-  const ff = ex.fused_from || {};
-  $("#score-bars").innerHTML = ["rule", "anomaly", "graph"].map((k) => {
-    const v = ff[k] ?? 0;
-    return `<div class="sb"><span>${k}</span>
-      <span class="track"><span class="fill" style="width:${Math.round(v * 100)}%"></span></span>
-      <span>${v.toFixed(2)}</span></div>`;
-  }).join("");
-  $("#evidence").innerHTML = (ex.evidence || []).map((e) => `
-    <div class="ev-card">
-      <div class="ev-kind ${e.kind}">${e.kind} · ${e.name} · ${(e.score ?? 0).toFixed(2)}</div>
-      <div class="ev-detail">${e.detail}</div>
-    </div>`).join("");
-
-  drawGraph(await j(`/api/graph?host=${encodeURIComponent(a.src_host)}`));
+  try {
+    state.graphView = await j(`/api/graph?host=${encodeURIComponent(a.src_host)}`);
+    if (state.screen === "graph") drawGX(state.graphView);
+  } catch (_) {}
+  renderContext(ex.evidence || []);
+  renderEvidenceRepo(ex.evidence || []);
 }
 
 async function selectHost(h) {
-  state.filter.host = h.ip;
-  state.activeAlert = null;
+  state.activeHost = h.ip; state.activeAlert = null; state.activeAlertObj = null;
+  $("#ai-host").textContent = h.ip;
+  $("#ai-alert").textContent = h.alert ? "#" + String(h.alert.alert_id).slice(0, 8).toUpperCase() : "—";
   render();
-
-  $("#detail-empty").hidden = true;
-  $("#detail").hidden = false;
-  $("#detail-host").textContent = h.ip;
-
   if (h.alert) {
     const a = state.alerts.find((x) => x.alert_id === h.alert.alert_id);
-    if (a) { await selectAlert(a); return; }
+    if (a) return selectAlert(a);
   }
-
-  $("#verdict").innerHTML = `<b>${h.ip}</b> · no alert — baseline client`;
-  $("#score-bars").innerHTML = "";
-  $("#ev-head").hidden = true;
-  $("#evidence").innerHTML = "";
-  $("#host-meta").hidden = false;
-  $("#host-meta").innerHTML = [
-    ["flows", h.flows], ["bytes", (h.bytes / 1e6).toFixed(1) + " MB"], ["bursts", h.bursts],
-    ["peers", h.peer_count], ["dst ports", h.dst_ports.join(", ") || "—"],
-    ["domains", h.domains.slice(0, 6).join(", ") || "—"],
-    ["periodicity", h.periodicity], ["fingerprint", h.fingerprint],
-  ].map(([k, v]) => `<div class="kv"><b>${k}</b><span>${v}</span></div>`).join("");
-
-  drawGraph(await j(`/api/graph?host=${encodeURIComponent(h.ip)}`));
+  $("#investigation-id").textContent = esc(h.ip);
+  $("#score-bars").innerHTML = `<div class="font-data-md text-[12px] text-outline">NO ALERT — BASELINE CLIENT</div>`;
+  $("#verdict").textContent = "";
+  state.lastEvidence = [];
+  wsShowDetail();
+  $("#ws-target").textContent = `${h.ip} · baseline client`;
+  $("#ws-verdict").innerHTML = `<span class="text-primary-fixed-dim">${esc(h.ip)}</span> · NO ALERT`;
+  $("#ws-summary").textContent = `${h.flows} flows · ${h.bursts} bursts · ${h.peer_count} peers · ${(h.bytes / 1e6).toFixed(1)} MB · periodicity ${h.periodicity} · fp ${h.fingerprint}`;
+  $("#ws-evidence").innerHTML = `<div class="font-data-md text-[12px] text-outline">baseline — no evidence · ports ${esc((h.dst_ports || []).slice(0, 12).join(", ") || "—")}</div>`;
+  try {
+    state.graphView = await j(`/api/graph?host=${encodeURIComponent(h.ip)}`);
+    if (state.screen === "graph") drawGX(state.graphView);
+  } catch (_) {}
 }
 
-/* ---------------- TB-graph (force layout + IP labels) ---------------- */
-function drawGraph(view) {
-  const svg = $("#graph");
-  svg.innerHTML = "";
-  const W = 540, H = 400;
-  const nodes = view.nodes.slice(0, 80);
-  const id2n = new Map(nodes.map((n) => [n.id, n]));
-  const edges = view.edges.filter((e) => id2n.has(e.src) && id2n.has(e.dst));
-
-  nodes.forEach((n, i) => {
-    n.x = W / 2 + Math.cos(i) * (40 + i * 4);
-    n.y = H / 2 + Math.sin(i) * (30 + i * 3);
-    n.fx = n.type === "host" ? W / 2 : null;
-    n.fy = n.type === "host" ? H / 2 : null;
+function renderScores(ff) {
+  const rows = [["rule", "Rule Signal"], ["anomaly", "Anomaly Signal"], ["graph", "TB-Graph Signal"]];
+  $("#score-bars").innerHTML = rows.map(([k, label]) => {
+    const v = Math.round((ff[k] ?? 0) * 100);
+    return `<div class="score ${k}"><div class="row"><span class="text-on-surface">${label}</span><span class="val" style="background:transparent">${v}%</span></div><div class="track"><div class="fill" style="width:${v}%"></div></div></div>`;
+  }).join("");
+}
+/* ================= attack storyline ================= */
+function renderTimeline() {
+  const track = $("#timeline-track");
+  track.querySelectorAll(".tl-marker").forEach((n) => n.remove());
+  const items = state.alerts.filter((a) => a.window_start);
+  if (!items.length) { $("#timeline-range").textContent = "—"; $("#timeline-fill").style.width = "0%"; $("#timeline-legend").textContent = ""; return; }
+  const t0 = Math.min(...items.map((a) => a.window_start));
+  const t1 = Math.max(...items.map((a) => a.window_end || a.window_start));
+  const span = (t1 - t0) || 1;
+  items.forEach((a) => {
+    const m = document.createElement("div");
+    m.className = `tl-marker sev-${a.severity}` + (a.alert_id === state.activeAlert ? " active" : "");
+    m.style.left = ((a.window_start - t0) / span) * 100 + "%";
+    m.title = `${a.threat_type} · ${a.src_host} · ${fmtTime(a.window_start)}`;
+    m.onclick = () => { const al = state.alerts.find((x) => x.alert_id === a.alert_id); if (al) selectAlert(al); };
+    track.appendChild(m);
   });
-  for (let it = 0; it < 240; it++) {
-    for (let a = 0; a < nodes.length; a++) {
-      for (let b = a + 1; b < nodes.length; b++) {
-        const p = nodes[a], q = nodes[b];
-        let dx = p.x - q.x, dy = p.y - q.y;
-        const f = 1500 / (dx * dx + dy * dy || 1);
-        dx *= f; dy *= f;
-        if (p.fx == null) { p.x += dx; p.y += dy; }
-        if (q.fx == null) { q.x -= dx; q.y -= dy; }
-      }
-    }
-    edges.forEach((e) => {
-      const p = id2n.get(e.src), q = id2n.get(e.dst);
-      let dx = q.x - p.x, dy = q.y - p.y;
-      const d = Math.hypot(dx, dy) || 1;
-      const k = (d - 74) * 0.02;
-      dx = (dx / d) * k; dy = (dy / d) * k;
-      if (p.fx == null) { p.x += dx; p.y += dy; }
-      if (q.fx == null) { q.x -= dx; q.y -= dy; }
-    });
-    nodes.forEach((n) => {
-      if (n.fx != null) { n.x = n.fx; n.y = n.fy; return; }
-      n.x = Math.max(40, Math.min(W - 40, n.x));
-      n.y = Math.max(18, Math.min(H - 18, n.y));
-    });
-  }
+  const act = state.alerts.find((a) => a.alert_id === state.activeAlert);
+  $("#timeline-fill").style.width = Math.max(2, act ? ((act.window_start - t0) / span) * 100 : 100) + "%";
+  $("#timeline-range").textContent = `${fmtTime(t0)} — ${fmtTime(t1)} UTC`;
+  $("#timeline-legend").textContent = `${items.length} EVENTS`;
+}
+const storyItems = () => [...state.alerts].filter((a) => a.window_start).sort((a, b) => a.window_start - b.window_start);
+function setPlayLabel(on) { $("#storyline-play-icon").textContent = on ? "stop" : "play_arrow"; $("#storyline-play-label").textContent = on ? "STOP" : "PLAY STORYLINE"; }
+function stopStoryline() { state.playing = false; setPlayLabel(false); }
+function playStoryline() {
+  if (state.playing) return stopStoryline();
+  const items = storyItems(); if (!items.length) return;
+  state.playing = true; setPlayLabel(true);
+  let i = 0;
+  const step = () => { if (!state.playing || i >= items.length) return stopStoryline(); selectAlert(items[i++]); setTimeout(step, 1100); };
+  step();
+}
+function storyStep(dir) {
+  stopStoryline();
+  const items = storyItems(); if (!items.length) return;
+  let idx = items.findIndex((a) => a.alert_id === state.activeAlert);
+  idx = idx < 0 ? (dir > 0 ? 0 : items.length - 1) : Math.min(items.length - 1, Math.max(0, idx + dir));
+  selectAlert(items[idx]);
+}
 
-  const ecol = (r) => r === "periodic" ? "#ff9f45" : r === "direction_change" ? "#ff4d6d" : "#5b6b93";
+/* ================= new-threat badge ================= */
+let _badge = null;
+function flashNewThreat() { const b = $("#new-threat-badge"); b.classList.remove("hidden"); clearTimeout(_badge); _badge = setTimeout(() => b.classList.add("hidden"), 4500); }
+
+/* ================= GRAPH EXPLORER — structured datapath layout ================= */
+const GX_W = 1280, GX_H = 720;
+const GX_TOP = 96, GX_BOT = 64, GX_COL_HOST = 96, GX_COL_BURST0 = 300;
+const GX_MAX_BURSTS = 16;
+const GX_SPINE = ["burst_in", "burst_out", "periodic", "direction_change"];
+let gxZoom = 1, gxPanX = 0, gxPanY = 0;
+
+function applyGX() {
+  $("#gx-svg").setAttribute("viewBox", `${gxPanX} ${gxPanY} ${GX_W / gxZoom} ${GX_H / gxZoom}`);
+}
+function enterGraphScreen() {
+  gxZoom = 1; gxPanX = 0; gxPanY = 0; applyGX();
+  if (state.graphView) { drawGX(state.graphView); return; }
+  // no selection yet — focus the busiest host so the datapath stays readable
+  const host = (state.activeAlertObj && state.activeAlertObj.src_host)
+    || (state.alerts[0] && state.alerts[0].src_host);
+  const url = host ? `/api/graph?host=${encodeURIComponent(host)}` : "/api/graph";
+  j(url).then((v) => { state.graphView = v; drawGX(v); }).catch(() => {});
+}
+
+/* Assign every node an (x,y) on a left→right datapath:
+   host  ──emits──▶  ordered burst chain (t →)  ──resolves──▶  domain column   */
+function datapathLayout(view) {
+  const nodes = view.nodes || [], edges = view.edges || [];
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const hosts = nodes.filter((n) => n.type === "host");
+  const bursts = nodes.filter((n) => n.type === "burst");
+  const domains = nodes.filter((n) => n.type === "domain");
+  const alerts = nodes.filter((n) => n.type === "alert");
+  const colDom = GX_W - 150;
+
+  // order bursts along their forward sequence edges
+  const next = new Map();
   edges.forEach((e) => {
-    const p = id2n.get(e.src), q = id2n.get(e.dst);
-    const ln = document.createElementNS(SVGNS, "line");
-    ln.setAttribute("x1", p.x); ln.setAttribute("y1", p.y);
-    ln.setAttribute("x2", q.x); ln.setAttribute("y2", q.y);
-    ln.setAttribute("stroke", ecol(e.rel));
-    ln.setAttribute("stroke-width", e.rel === "emits" ? 0.5 : 1.5);
-    ln.setAttribute("stroke-opacity", e.rel === "emits" ? 0.3 : 0.85);
-    svg.appendChild(ln);
+    if (byId.get(e.src)?.type === "burst" && byId.get(e.dst)?.type === "burst" && GX_SPINE.includes(e.rel) && !next.has(e.src))
+      next.set(e.src, e.dst);
+  });
+  const indeg = new Map(bursts.map((b) => [b.id, 0]));
+  next.forEach((d) => indeg.set(d, (indeg.get(d) || 0) + 1));
+  const ordered = [], seen = new Set();
+  bursts.filter((b) => (indeg.get(b.id) || 0) === 0).forEach((root) => {
+    let cur = root.id;
+    while (cur && !seen.has(cur)) { seen.add(cur); ordered.push(byId.get(cur)); cur = next.get(cur); }
+  });
+  bursts.forEach((b) => { if (!seen.has(b.id)) ordered.push(b); });
+
+  // group into per-host lanes
+  const hostKey = (h) => h.attrs?.ip || h.id;
+  const laneKeys = hosts.length ? hosts.map(hostKey) : ["_"];
+  const lanes = new Map(laneKeys.map((k) => [k, []]));
+  ordered.forEach((b) => {
+    const k = b.attrs?.host && lanes.has(b.attrs.host) ? b.attrs.host : laneKeys[0];
+    lanes.get(k).push(b);
   });
 
-  nodes.forEach((n) => {
+  const place = new Map();
+  const laneCount = Math.max(1, lanes.size);
+  const laneH = (GX_H - GX_TOP - GX_BOT) / laneCount;
+  const dense = laneCount > 3;
+  let li = 0, shownBursts = 0, totalBursts = bursts.length;
+  lanes.forEach((bs, key) => {
+    const cy = GX_TOP + laneH * (li + 0.5); li++;
+    const hNode = hosts.find((h) => hostKey(h) === key);
+    if (hNode) place.set(hNode.id, { x: GX_COL_HOST, y: cy });
+    const list = bs.slice(0, GX_MAX_BURSTS);
+    shownBursts += list.length;
+    const span = colDom - 120 - GX_COL_BURST0;
+    list.forEach((b, i) => {
+      const x = list.length === 1 ? GX_COL_BURST0 + span * 0.4 : GX_COL_BURST0 + span * (i / (list.length - 1));
+      place.set(b.id, { x, y: cy });
+    });
+  });
+
+  // domains: right column, y ≈ mean of the bursts that resolve to them, then de-overlap
+  const rows = domains.map((d) => {
+    const ys = edges.filter((e) => e.dst === d.id && e.rel === "resolves")
+      .map((e) => place.get(e.src)?.y).filter((v) => v != null);
+    return { d, y: ys.length ? ys.reduce((a, b) => a + b, 0) / ys.length : GX_H / 2 };
+  }).sort((a, b) => a.y - b.y);
+  const gap = 30;
+  for (let i = 1; i < rows.length; i++) if (rows[i].y - rows[i - 1].y < gap) rows[i].y = rows[i - 1].y + gap;
+  const overflow = rows.length ? rows[rows.length - 1].y - (GX_H - GX_BOT) : 0;
+  rows.forEach((o) => place.set(o.d.id, { x: colDom, y: Math.max(GX_TOP, o.y - Math.max(0, overflow)) }));
+
+  alerts.forEach((al) => {
+    const on = edges.find((e) => e.src === al.id && e.rel === "raised_on");
+    const p = on && place.get(on.dst);
+    place.set(al.id, { x: p ? p.x : GX_COL_HOST, y: p ? p.y - 44 : GX_TOP });
+  });
+
+  nodes.forEach((n) => { const p = place.get(n.id); if (p) { n.x = p.x; n.y = p.y; } });
+  return {
+    nodes: nodes.filter((n) => place.has(n.id)),
+    edges: edges.filter((e) => place.has(e.src) && place.has(e.dst)),
+    shownBursts, totalBursts, dense,
+  };
+}
+
+function gxEdgePath(x1, y1, x2, y2) {
+  const mx = (x1 + x2) / 2;
+  return `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
+}
+function styleGXEdge(p, rel) {
+  if (rel === "periodic") { p.setAttribute("stroke", "url(#gx-flow)"); p.setAttribute("stroke-width", "2.5"); p.setAttribute("stroke-dasharray", "9 6"); p.setAttribute("class", "edge-anim"); }
+  else if (rel === "direction_change") { p.setAttribute("stroke", "#ffb4ab"); p.setAttribute("stroke-width", "2"); p.setAttribute("stroke-dasharray", "5 4"); p.setAttribute("stroke-opacity", ".9"); }
+  else if (rel === "burst_in" || rel === "burst_out") { p.setAttribute("stroke", "#00dbe7"); p.setAttribute("stroke-width", "2"); p.setAttribute("stroke-opacity", ".55"); }
+  else if (rel === "resolves") { p.setAttribute("stroke", "#e8c423"); p.setAttribute("stroke-width", "1.4"); p.setAttribute("stroke-opacity", ".55"); }
+  else if (rel === "emits") { p.setAttribute("stroke", "#849495"); p.setAttribute("stroke-width", "1"); p.setAttribute("stroke-opacity", ".28"); }
+  else { p.setAttribute("stroke", "#3a494b"); p.setAttribute("stroke-width", "1.4"); p.setAttribute("stroke-opacity", ".7"); }
+  p.setAttribute("fill", "none");
+}
+function gxText(x, y, str, cls, anchor) {
+  const t = document.createElementNS(SVGNS, "text");
+  t.setAttribute("x", x); t.setAttribute("y", y);
+  t.setAttribute("text-anchor", anchor || "middle");
+  t.setAttribute("class", cls || "gx-lbl");
+  t.textContent = str;
+  return t;
+}
+const clip = (s, n) => { s = String(s || ""); return s.length > n ? s.slice(0, n - 1) + "…" : s; };
+
+function drawGX(view) {
+  const svg = $("#gx-svg");
+  [...svg.querySelectorAll(":scope > *:not(defs)")].forEach((n) => n.remove());
+  const g = datapathLayout({ nodes: (view.nodes || []).map((n) => ({ ...n })), edges: view.edges || [] });
+  const byId = new Map(g.nodes.map((n) => [n.id, n]));
+
+  // column guide headers
+  [["HOST", GX_COL_HOST], ["TRAFFIC BURSTS   ( t → )", (GX_COL_BURST0 + GX_W - 150) / 2], ["RESOLVED DOMAINS", GX_W - 150]]
+    .forEach(([label, x]) => svg.appendChild(gxText(x, 40, label, "gx-head")));
+  if (g.totalBursts > g.shownBursts)
+    svg.appendChild(gxText((GX_COL_BURST0 + GX_W - 150) / 2, 60, `showing ${g.shownBursts} of ${g.totalBursts} bursts`, "gx-note"));
+
+  // edges (behind nodes)
+  g.edges.forEach((e) => {
+    const p = byId.get(e.src), q = byId.get(e.dst); if (!p || !q) return;
+    const path = document.createElementNS(SVGNS, "path");
+    path.setAttribute("d", gxEdgePath(p.x, p.y, q.x, q.y));
+    styleGXEdge(path, e.rel);
+    svg.appendChild(path);
+  });
+
+  // nodes
+  g.nodes.forEach((n) => {
     const a = n.attrs || {};
+    const grp = document.createElementNS(SVGNS, "g");
+    grp.setAttribute("transform", `translate(${n.x} ${n.y})`);
+    grp.style.cursor = "pointer";
+
+    if (n.type === "burst") {
+      const halo = document.createElementNS(SVGNS, "circle");
+      halo.setAttribute("r", "15"); halo.setAttribute("fill", "none");
+      halo.setAttribute("stroke", "#ffb4ab"); halo.setAttribute("stroke-width", "1.5");
+      halo.setAttribute("class", "node-ping");
+      grp.appendChild(halo);
+    }
     const c = document.createElementNS(SVGNS, "circle");
-    c.setAttribute("cx", n.x); c.setAttribute("cy", n.y);
-    c.setAttribute("r", n.type === "host" ? 9 : n.type === "burst" ? 5 : 4);
-    c.setAttribute("fill", NODE_COLOR[n.type] || "#889");
-    c.setAttribute("stroke", "#0c142a"); c.setAttribute("stroke-width", "1.5");
+    const r = n.type === "host" ? 16 : n.type === "burst" ? 9 : n.type === "alert" ? 7 : 8;
+    c.setAttribute("r", r);
+    c.setAttribute("fill", n.type === "alert" ? "#ffb4ab" : NODE_COLOR[n.type] || "#889");
+    c.setAttribute("filter", n.type === "burst" || n.type === "alert" ? "url(#gx-glow-burst)" : "url(#gx-glow)");
+    if (n.type === "host") { c.setAttribute("fill", "#0d1515"); c.setAttribute("stroke", "#00f2ff"); c.setAttribute("stroke-width", "2.5"); }
+    grp.appendChild(c);
 
-    let tip = n.id;
-    if (n.type === "host") tip = `host ${a.ip}`;
-    else if (n.type === "domain") tip = `domain ${a.name}`;
-    else if (n.type === "burst") {
-      const ports = (a.dst_ports || []).join(",");
-      tip = `burst → ${a.peer || "?"}` +
-        `\ndir ${a.direction} · ${(a.flow_count | 0)} flows · ${fmtBytes(a.byte_count)}` +
-        (ports ? `\nports ${ports}` : "") +
-        (a.domains && a.domains.length ? `\n${a.domains.slice(0, 3).join(", ")}` : "") +
-        (a.intra_periodicity ? `\nperiodicity ${(+a.intra_periodicity).toFixed(2)}` : "");
+    if (n.type === "host") {
+      grp.appendChild(gxText(0, r + 18, clip(a.ip || "HOST", 22), "gx-lbl gx-host"));
+      if (!g.dense) grp.appendChild(gxText(0, r + 32, "monitored endpoint", "gx-sub"));
+    } else if (n.type === "domain") {
+      grp.appendChild(gxText(0, -r - 8, clip(a.name || "domain", g.dense ? 18 : 26), "gx-lbl"));
+    } else if (n.type === "burst") {
+      if (!g.dense) {
+        grp.appendChild(gxText(0, r + 16, clip(a.peer || "burst", 20), "gx-lbl"));
+        grp.appendChild(gxText(0, r + 28, `${(a.flow_count | 0)} fl · ${fmtBytes(a.byte_count)}`, "gx-sub"));
+      }
+    } else if (n.type === "alert") {
+      grp.appendChild(gxText(0, -r - 8, "ALERT", "gx-lbl gx-alert"));
     }
-    const t = document.createElementNS(SVGNS, "title");
-    t.textContent = tip;
-    c.appendChild(t);
-    svg.appendChild(c);
 
-    if (n.type === "host" || n.type === "domain") {
-      const lbl = document.createElementNS(SVGNS, "text");
-      lbl.setAttribute("x", n.x + 11);
-      lbl.setAttribute("y", n.y + 3);
-      lbl.setAttribute("class", n.type === "host" ? "host-lbl" : "");
-      lbl.textContent = n.type === "host" ? (a.ip || "") : (a.name || "");
-      svg.appendChild(lbl);
-    }
+    grp.addEventListener("click", (ev) => { ev.stopPropagation(); showGXMeta(n); });
+    svg.appendChild(grp);
   });
 }
-const fmtBytes = (b) => {
-  b = +b || 0;
-  if (b > 1e6) return (b / 1e6).toFixed(1) + " MB";
-  if (b > 1e3) return (b / 1e3).toFixed(1) + " KB";
-  return b + " B";
+function showGXMeta(n) {
+  const a = n.attrs || {};
+  $("#gx-meta").classList.remove("translate-x-full");
+  $("#gx-meta-empty").classList.add("hidden");
+  const body = $("#gx-meta-body");
+  body.classList.remove("hidden"); body.classList.add("flex");
+  let title = n.id, addr = "—", metric = n.type.toUpperCase(), detail = "";
+  if (n.type === "host") { title = a.ip || "HOST"; addr = a.ip || "—"; metric = "HOST NODE"; detail = "Local host / monitored endpoint. Central anchor of its TB-subgraph."; }
+  else if (n.type === "domain") { title = a.name || "DOMAIN"; addr = a.name || "—"; metric = "DOMAIN"; detail = `Resolved domain observed in traffic bursts for this host.`; }
+  else if (n.type === "burst") {
+    title = "TRAFFIC BURST"; addr = a.peer || "—";
+    metric = a.intra_periodicity != null ? `periodicity ${(+a.intra_periodicity).toFixed(2)}` : "BURST";
+    detail = `direction ${a.direction || "?"} · ${(a.flow_count | 0)} flows · ${fmtBytes(a.byte_count)}\n` +
+      `ports ${(a.dst_ports || []).join(", ") || "—"}\n` +
+      ((a.domains && a.domains.length) ? `domains ${a.domains.slice(0, 5).join(", ")}` : "");
+  }
+  $("#gx-meta-title").textContent = title;
+  $("#gx-meta-ip").textContent = addr;
+  const sc = $("#gx-meta-score");
+  sc.textContent = metric;
+  sc.className = "font-data-md text-[14px] " + (n.type === "burst" ? "text-error" : "text-primary-fixed-dim");
+  $("#gx-meta-history").textContent = detail || "—";
+  $("#gx-meta").dataset.pivot = a.ip || a.peer || a.name || "";
+}
+
+/* ================= AI INTELLIGENCE screen ================= */
+const SUGGESTED = [
+  ["explore", "Analyze lateral movement risk", "Trace peer reachability from the target host"],
+  ["history", "Correlate with prior detections", "Find alerts sharing this threat class"],
+  ["hub", "Explain the TB-graph structure", "Summarise the burst subgraph around this host"],
+];
+function renderSuggestedPaths() {
+  $("#suggested-paths").innerHTML = SUGGESTED.map(([ic, t, s]) => `
+    <button class="path-btn w-full text-left bg-surface-container hover:bg-surface-container-highest p-3 rounded-lg border border-outline-variant/10 hover:border-primary-fixed-dim/30 transition-all group flex items-start gap-3" data-q="${esc(t)}">
+      <span class="material-symbols-outlined text-on-surface-variant group-hover:text-primary-fixed-dim text-[18px] mt-0.5">${ic}</span>
+      <div class="flex flex-col"><span class="text-[14px] text-on-surface">${esc(t)}</span>
+      <span class="font-data-md text-on-surface-variant text-[11px] mt-1 line-clamp-1">${esc(s)}</span></div>
+    </button>`).join("");
+  $$("#suggested-paths .path-btn").forEach((b) => b.onclick = () => { setScreen("ai"); chatSend(b.dataset.q); });
+}
+function renderContext(evi) {
+  const a = state.activeAlertObj;
+  if (!a) return;
+  $("#ctx-alert-name").textContent = a.title || (a.threat_type || "").replace(/_/g, " ");
+  $("#ctx-alert-sub").textContent = `CONF ${(a.confidence ?? 0).toFixed(2)} · ${(evi[0] && evi[0].name) || a.threat_type}`;
+  const sev = $("#ctx-alert-sev");
+  sev.textContent = (a.severity || "").toUpperCase();
+  sev.style.color = SEV_COLOR[a.severity] || "#ffb4ab";
+  $("#ctx-host").textContent = a.src_host;
+  $("#ctx-host-sub").textContent = (a.peers && a.peers.length) ? `${a.peers.length} peers` : "isolated";
+  const gv = state.graphView || {};
+  $("#ctx-edges").textContent = (gv.edges || []).length || "0";
+  $("#ctx-peers").textContent = (a.peers || []).length;
+  $("#ctx-impact").textContent = ((a.confidence ?? 0) * 10).toFixed(1);
+}
+function renderEvidenceRepo(evi) {
+  const box = $("#evidence-repo");
+  if (!evi || !evi.length) { box.innerHTML = `<div class="font-data-md text-[12px] text-outline">No evidence for the selected target.</div>`; return; }
+  const icon = { rule: "gavel", anomaly: "show_chart", ml: "network_intelligence", graph: "account_tree" };
+  box.innerHTML = evi.map((e) => {
+    const data = e.data && typeof e.data === "object" ? Object.entries(e.data) : [];
+    return `<div class="bg-surface border border-outline-variant/20 rounded-lg overflow-hidden">
+      <div class="px-3 py-2 bg-surface-container flex items-center justify-between border-b border-outline-variant/10">
+        <div class="flex items-center gap-2"><span class="material-symbols-outlined text-on-surface-variant text-[14px]">${icon[e.kind] || "description"}</span>
+        <span class="font-data-md text-on-surface text-[11px]">${esc(e.name)}</span></div>
+        <span class="font-label-caps text-[9px] text-on-surface-variant">${esc((e.kind || "").toUpperCase())} · ${(e.score ?? 0).toFixed(2)}</span>
+      </div>
+      <div class="p-3 evidence-body">
+        <div class="font-data-md text-[11px] text-on-surface-variant leading-relaxed">${esc(e.detail)}</div>
+        ${data.length ? `<div class="mt-2 flex flex-col gap-1 font-data-md text-[10px]">${data.slice(0, 8).map(([k, v]) =>
+          `<div class="flex justify-between gap-3 text-on-surface-variant"><span>${esc(k)}</span><span class="text-on-surface truncate">${esc(typeof v === "object" ? JSON.stringify(v) : v)}</span></div>`).join("")}</div>` : ""}
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function appendChat(role, html, ts) {
+  const t = ts || new Date().toISOString().slice(11, 23) + "Z";
+  state.chat.push({ role, text: html.replace(/<[^>]+>/g, ""), ts: t });
+  const c = $("#chat-container");
+  const mine = role === "OPERATOR";
+  const ai = role === "NEXUS_AI";
+  const wrap = document.createElement("div");
+  wrap.className = "flex gap-4 max-w-3xl" + (mine ? " self-end flex-row-reverse" : "");
+  wrap.innerHTML = `
+    <div class="w-8 h-8 rounded-full grid place-items-center shrink-0 border ${mine ? "bg-surface-container-highest border-outline-variant/30" : "bg-primary-container/10 border-primary-fixed-dim/30"}">
+      <span class="material-symbols-outlined ${mine ? "text-on-surface" : "text-primary-fixed-dim"} text-[16px]">${mine ? "person" : role === "SYSTEM" ? "terminal" : "auto_awesome"}</span>
+    </div>
+    <div class="flex flex-col gap-2 pt-1 ${mine ? "items-end" : "w-full"}">
+      <div class="flex items-center gap-2 ${mine ? "flex-row-reverse" : ""}">
+        <span class="font-label-caps ${mine ? "text-on-surface" : "text-primary-fixed-dim"} text-[10px]">${role}</span>
+        <span class="font-data-md text-on-surface-variant text-[10px]">${t}</span>
+      </div>
+      <div class="${mine ? "bg-surface-container p-4 rounded-2xl rounded-tr-sm text-[14px] text-on-surface"
+        : ai ? "bg-surface-container-lowest p-5 rounded-xl border border-outline-variant/20 relative overflow-hidden font-data-md text-[13px] text-on-surface leading-relaxed"
+        : "font-data-md text-[13px] text-on-surface opacity-80 leading-relaxed"}">
+        ${ai ? '<div class="absolute top-0 left-0 w-1 h-full bg-primary-fixed-dim"></div>' : ""}${html}
+      </div>
+    </div>`;
+  c.appendChild(wrap);
+  c.scrollTop = c.scrollHeight;
+}
+function enterAIScreen() {
+  renderSuggestedPaths();
+  if (state.activeAlertObj) { renderContext(state.lastEvidence || []); renderEvidenceRepo(state.lastEvidence || []); }
+  if (!state.chatSeeded) {
+    state.chatSeeded = true;
+    appendChat("SYSTEM", "Nexus AI connected to the UniNet TB-graph store. This is the Phase-4 read-only analyst assistant — it reads alerts, evidence and graph only. Awaiting operator query…");
+  }
+  $("#chat-input").focus();
+}
+async function chatSend(text) {
+  const val = (text != null ? text : $("#chat-input").value).trim();
+  if (!val) return;
+  $("#chat-input").value = "";
+  $("#chat-input").style.height = "auto";
+  appendChat("OPERATOR", esc(val));
+  try {
+    const r = await fetch("/api/ask", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ q: val, alert_id: state.activeAlert, host: state.activeHost || (state.activeAlertObj && state.activeAlertObj.src_host) }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok && d.answer) appendChat("NEXUS_AI", esc(d.answer));
+    else appendChat("NEXUS_AI",
+      `<p><strong>Assistant offline (${r.status}).</strong> ${esc(d.error || "unavailable")}</p>` +
+      (d.note ? `<p class="mt-2 text-on-surface-variant">${esc(d.note)}</p>` : "") +
+      (state.activeAlertObj ? `<p class="mt-2 text-on-surface-variant">Context on file — alert <span class="text-primary-fixed-dim">${esc(state.activeAlertObj.threat_type)}</span> on <span class="text-primary-fixed-dim">${esc(state.activeAlertObj.src_host)}</span>, confidence ${(state.activeAlertObj.confidence ?? 0).toFixed(2)}. See the Evidence Repository panel.</p>` : ""));
+  } catch (_) { appendChat("NEXUS_AI", "<p>Request failed.</p>"); }
+}
+function exportChat() {
+  const lines = state.chat.map((m) => `[${m.ts}] ${m.role}: ${m.text}`).join("\n");
+  const blob = new Blob([lines || "(empty)"], { type: "text/plain" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "uninet-nexus-log.txt";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+/* ================= SSE ================= */
+function connectStream() {
+  const dot = $("#live-dot"), label = $("#live-label");
+  let es;
+  try { es = new EventSource("/api/stream"); } catch (_) { return; }
+  es.onopen = () => { if (dot) dot.className = "w-2 h-2 rounded-full bg-primary-container animate-pulse"; if (label) label.textContent = "SYSTEM_SYNCED"; };
+  es.onmessage = (e) => { let v = null; try { v = JSON.parse(e.data).version; } catch (_) {} if (v == null || v !== state.version) scheduleTick(); };
+  es.onerror = () => { if (dot) dot.className = "w-2 h-2 rounded-full bg-tertiary-fixed"; if (label) label.textContent = "RECONNECTING"; };
+}
+
+/* ================= wiring ================= */
+$$("#rail .nav-icon[data-screen]").forEach((b) => b.onclick = () => setScreen(b.dataset.screen));
+$("#filter-clear").onclick = clearFilter;
+$("#queue-clear").onclick = clearFilter;
+$("#queue-mode").onclick = () => { state.queueMode = state.queueMode === "alerts" ? "hosts" : "alerts"; render(); };
+$("#queue-filter").onclick = () => {
+  const order = [undefined, "critical", "high", "medium", "low"];
+  state.filter.severity = order[(order.indexOf(state.filter.severity) + 1) % order.length];
+  render();
+};
+$("#storyline-play").onclick = playStoryline;
+$("#story-prev").onclick = () => storyStep(-1);
+$("#story-next").onclick = () => storyStep(1);
+$("#story-pause").onclick = stopStoryline;
+$$(".ws-jump").forEach((b) => b.onclick = () => setScreen(b.dataset.to));
+$("#ws-open-graph").onclick = () => setScreen("graph");
+$("#ws-open-ai").onclick = () => {
+  setScreen("ai");
+  if (state.activeAlertObj) chatSend(`Summarise alert ${state.activeAlertObj.threat_type} on ${state.activeAlertObj.src_host}.`);
 };
 
-/* ---------------- refresh loop ---------------- */
-let _ticking = false;
-async function tick() {
-  if (_ticking) return;
-  _ticking = true;
-  try {
-    const [, alerts, hosts] = await Promise.all([loadStats(), j("/api/alerts"), j("/api/hosts")]);
-    state.alerts = alerts;
-    state.hosts = hosts;
-    state.lastUpdate = Date.now();
-    render();
-    paintRefreshed();
-  } catch (_) {} finally { _ticking = false; }
-}
+/* graph explorer controls */
+$("#gx-zoom-in").onclick = () => { gxZoom = Math.min(5, gxZoom * 1.3); applyGX(); };
+$("#gx-zoom-out").onclick = () => { gxZoom = Math.max(0.4, gxZoom / 1.3); applyGX(); };
+$("#gx-center").onclick = () => { gxPanX = 0; gxPanY = 0; applyGX(); };
+$("#gx-reset").onclick = () => { gxZoom = 1; gxPanX = 0; gxPanY = 0; applyGX(); if (state.graphView) drawGX(state.graphView); };
+$("#gx-meta-close").onclick = () => $("#gx-meta").classList.add("translate-x-full");
+$("#gx-expand").onclick = () => {
+  const pivot = $("#gx-meta").dataset.pivot;
+  if (!pivot) return;
+  j(`/api/graph?host=${encodeURIComponent(pivot)}`).then((v) => { state.graphView = v; drawGX(v); }).catch(() => {});
+};
+$("#gx-trace").onclick = () => {
+  const pivot = $("#gx-meta").dataset.pivot || "target";
+  setScreen("ai");
+  chatSend(`Trace and explain the traffic path for ${pivot}.`);
+};
+(() => {
+  const svg = $("#gx-svg");
+  let drag = false, sx = 0, sy = 0;
+  svg.addEventListener("mousedown", (e) => { drag = true; sx = e.clientX; sy = e.clientY; });
+  window.addEventListener("mouseup", () => { drag = false; });
+  window.addEventListener("mousemove", (e) => {
+    if (!drag) return;
+    const r = svg.getBoundingClientRect();
+    gxPanX -= (e.clientX - sx) * (GX_W / gxZoom) / r.width;
+    gxPanY -= (e.clientY - sy) * (GX_H / gxZoom) / r.height;
+    sx = e.clientX; sy = e.clientY;
+    applyGX();
+  });
+})();
 
-/* debounce bursts of stream events into one refresh */
-let _tickTimer = null;
-function scheduleTick() {
-  clearTimeout(_tickTimer);
-  _tickTimer = setTimeout(tick, 250);
-}
+/* AI chat */
+$("#chat-send").onclick = () => chatSend();
+$("#chat-input").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); chatSend(); } });
+$("#chat-input").addEventListener("input", function () { this.style.height = "auto"; this.style.height = Math.min(128, this.scrollHeight) + "px"; });
+$("#chat-export").onclick = exportChat;
 
-/* ---------------- real-time stream (SSE) ---------------- */
-function connectStream() {
-  const dot = $("#live-dot");
-  let es;
-  try { es = new EventSource("/api/stream"); }
-  catch (_) { return; }
+/* search */
+const _search = $("#search");
+_search.addEventListener("input", () => {
+  state.filter.q = _search.value.trim().toLowerCase() || undefined;
+  $("#search-clear").classList.toggle("hidden", !_search.value);
+  render();
+});
+$("#search-clear").onclick = () => { _search.value = ""; state.filter.q = undefined; $("#search-clear").classList.add("hidden"); render(); };
 
-  es.onopen = () => { if (dot) { dot.className = "live-dot on"; dot.hidden = false; } };
-  es.onmessage = (e) => {
-    let v = null;
-    try { v = JSON.parse(e.data).version; } catch (_) {}
-    if (v == null || v !== state.version) scheduleTick();
-  };
-  es.onerror = () => { if (dot) dot.className = "live-dot stale"; };  // EventSource auto-reconnects
-}
-
-document.querySelectorAll(".tab").forEach((t) => t.onclick = () => setView(t.dataset.view));
-document.querySelectorAll("[data-goto]").forEach((el) => el.onclick = () => setView(el.dataset.goto));
-document.querySelectorAll("[data-filter-clear]").forEach((el) => el.onclick = clearFilter);
-$("#filter-clear").onclick = clearFilter;
-
-setView("overview");
+setScreen("workspace");
 loadConfig();
 tick();
 connectStream();
-setInterval(tick, 20000);          // fallback poll if the stream is down
-setInterval(paintRefreshed, 1000); // "updated Ns ago" ticker
+setInterval(tick, 20000);
+setInterval(paintRefreshed, 1000);

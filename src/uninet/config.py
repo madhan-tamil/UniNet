@@ -38,6 +38,7 @@ class Settings:
     model_dir: str = "models"
     anomaly_model: str = "anomaly_isoforest.joblib"
     rgat_model: str = "rgat.pt"
+    sequence_model: str = "sequence_gru.pt"
 
     api_host: str = "127.0.0.1"
     api_port: int = 8000
@@ -56,6 +57,10 @@ class Settings:
     @property
     def model_path_rgat(self) -> Path:
         return REPO_ROOT / self.model_dir / self.rgat_model
+
+    @property
+    def model_path_sequence(self) -> Path:
+        return REPO_ROOT / self.model_dir / self.sequence_model
 
     def normalized_fusion_weights(self) -> dict[str, float]:
         total = sum(self.fusion_weights.values()) or 1.0
